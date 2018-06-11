@@ -1,0 +1,31 @@
+; Control starts here, but there's more ROM header several bytes later, so the
+; only thing we can really do is immediately jump to after the header
+SECTION "init", ROM0[$0100]
+    nop
+    jp $0150
+
+; Initialization and whatnot
+SECTION "main", ROM0[$0150]
+    ; TODO enable interrupts?
+
+    ; Set LCD palette for grayscale mode; yes, it has a palette
+    ld a, %11100100
+    ld [$FF00+$47], a
+
+    ; Set CHR tile 0 to be vertical stripes.  The map defaults to all zeroes,
+    ; so the screen will just fill with this
+    ; TODO i think i'm supposed to only do this with DMA or during a vblank or something??
+    ld hl, $8000
+    ld bc, `00112233
+    REPT 8
+    ld a, b
+    ld [hl+], a
+    ld a, c
+    ld [hl+], a
+    ENDR
+
+_halt:
+    ; Do nothing, forever
+    halt
+    nop
+    jr _halt
