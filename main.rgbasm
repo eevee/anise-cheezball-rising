@@ -12,6 +12,37 @@ SECTION "main", ROM0[$0150]
     ld a, %11100100
     ld [$FF00+$47], a
 
+    ; Set a color palette.  Those aren't exposed directly in main RAM; instead,
+    ; you have to write to a register, which will then write the palette to...
+    ; somewhere.  Also, colors are two bytes (RGB555), but the register is only
+    ; one byte, which complicates things a bit more.
+    ; Luckily, if we set the high bit of the control register to 1, it
+    ; auto-increments every time we write to the write register, meaning...
+    ; well, it looks like this.
+    ld a, %10000000
+    ld [$FF00+$68], a
+
+    ld bc, %0111110000000000  ; red
+    ld a, c
+    ld [$FF00+$69], a
+    ld a, b
+    ld [$FF00+$69], a
+    ld bc, %0000001111100000  ; green
+    ld a, c
+    ld [$FF00+$69], a
+    ld a, b
+    ld [$FF00+$69], a
+    ld bc, %0000000000011111  ; blue
+    ld a, c
+    ld [$FF00+$69], a
+    ld a, b
+    ld [$FF00+$69], a
+    ld bc, %0111111111111111  ; white
+    ld a, c
+    ld [$FF00+$69], a
+    ld a, b
+    ld [$FF00+$69], a
+
     ; Set CHR tile 0 to be vertical stripes.  The map defaults to all zeroes,
     ; so the screen will just fill with this
     ; TODO i think i'm supposed to only do this with DMA or during a vblank or something??
