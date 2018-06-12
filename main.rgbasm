@@ -8,6 +8,13 @@ BUTTON_B      EQU 5
 BUTTON_START  EQU 6
 BUTTON_SELECT EQU 7
 
+dcolor: MACRO  ; COLOR($rrggbb) -> gbc representation
+_r = ((\1) & $ff0000) >> 16 >> 3
+_g = ((\1) & $00ff00) >> 8  >> 3
+_b = ((\1) & $0000ff) >> 0  >> 3
+    dw (_r << 0) | (_g << 5) | (_b << 10)
+    ENDM
+
 
 ; Interrupt addresses
 SECTION "Vblank interrupt", ROM0[$0040]
@@ -64,26 +71,11 @@ main:
     ld a, %10000000
     ld [$FF00+$68], a
 
-    ld bc, %0100111101011100  ; pale yellow
-    ld a, c
+    ld hl, PALETTE_BG0
+    REPT 8
+    ld a, [hl+]
     ld [$FF00+$69], a
-    ld a, b
-    ld [$FF00+$69], a
-    ld bc, %0011111010110101  ; yellowy green
-    ld a, c
-    ld [$FF00+$69], a
-    ld a, b
-    ld [$FF00+$69], a
-    ld bc, %0000000000011111  ; red
-    ld a, c
-    ld [$FF00+$69], a
-    ld a, b
-    ld [$FF00+$69], a
-    ld bc, %0111111111111111  ; white
-    ld a, c
-    ld [$FF00+$69], a
-    ld a, b
-    ld [$FF00+$69], a
+    ENDR
 
     ; Load some basic tiles
     ; TODO wait, i thought the background was at 8800 by default, augh
@@ -121,28 +113,12 @@ main:
 
     ; Same thing but for an object palette
     ld a, %10000000
-    ld [$FF00+$6A], a
-
-    ld bc, %0000000000000000  ; transparent
-    ld a, c
-    ld [$FF00+$6B], a
-    ld a, b
-    ld [$FF00+$6B], a
-    ld bc, %0010110100100101  ; dark
-    ld a, c
-    ld [$FF00+$6B], a
-    ld a, b
-    ld [$FF00+$6B], a
-    ld bc, %0100000111001101  ; med
-    ld a, c
-    ld [$FF00+$6B], a
-    ld a, b
-    ld [$FF00+$6B], a
-    ld bc, %0100001000010001  ; white
-    ld a, c
-    ld [$FF00+$6B], a
-    ld a, b
-    ld [$FF00+$6B], a
+    ldh [$ff6a], a
+    ld hl, PALETTE_ANISE
+    REPT 8
+    ld a, [hl+]
+    ldh [$ff6b], a
+    ENDR
 
     ; Define an object
     ld hl, $8800
@@ -250,6 +226,16 @@ vblank_loop:
 
 
 SECTION "Sprites", ROM0
+PALETTE_BG0:
+    dcolor $ddd49b
+    dcolor $aba677
+    dcolor $000000
+    dcolor $000000
+PALETTE_ANISE:
+    dcolor $000000
+    dcolor $284858
+    dcolor $687080
+    dcolor $888080
 GRASS_SPRITE:
     dw `00000000
     dw `00100000
