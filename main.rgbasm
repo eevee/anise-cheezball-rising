@@ -3,21 +3,21 @@ SECTION "Vblank interrupt", ROM0[$0040]
     ld a, $01
     ld hl, vblank_flag
     ld [hl], a
-    ret
+    reti
 
 SECTION "LCD controller status interrupt", ROM0[$0048]
     ; I think this happens when the screen is updating and hits a user-specified row, so this is where you'd do stuff like wavy screen effects
-    ret
+    reti
 
 SECTION "Timer overflow interrupt", ROM0[$0050]
-    ret
+    reti
 
 SECTION "Serial transfer completion interrupt", ROM0[$0058]
-    ret
+    reti
 
 SECTION "P10-P13 signal low edge interrupt", ROM0[$0060]
     ; ???
-    ret
+    reti
 
 ; Control starts here, but there's more ROM header several bytes later, so the
 ; only thing we can really do is immediately jump to after the header
