@@ -41,10 +41,22 @@ SECTION "P10-P13 signal low edge interrupt", ROM0[$0060]
 ; only thing we can really do is immediately jump to after the header
 SECTION "init", ROM0[$0100]
     nop
-    jp $0150
+    jp main
 
 ; Initialization and whatnot
 SECTION "main", ROM0[$0150]
+; DMA copy routine, not used directly but copied into high RAM at startup
+dma_copy:
+    ld a, $c1
+    ldh [$ff46], a              ; begin transfer
+    ld a, 40                    ; wait for 160 cycles
+.loop:
+    dec a
+    jr nz, .loop
+    ret
+dma_copy_end:
+    nop
+
 main:
     ; Enable interrupts
     ld a, %00000001  ; only vblank
@@ -145,9 +157,9 @@ main:
     ld [hl+], a
 
     ; DMA something
-    ld bc, DMA_BYTECODE
+    ld bc, dma_copy
     ld hl, $FF80
-    REPT 13
+    REPT dma_copy_end - dma_copy
     ld a, [bc]
     inc bc
     ld [hl+], a
@@ -271,10 +283,6 @@ ANISE_SPRITE:
     dw `00113332
     dw `00003002
     dw `00003002
-
-SECTION "DMA Bytecode", ROM0
-DMA_BYTECODE:
-    db $F5, $3E, $C1, $EA, $46, $FF, $3E, $28, $3D, $20, $FD, $F1, $D9
 
 SECTION "Important twiddles", WRAM0[$C000]
 vblank_flag:
