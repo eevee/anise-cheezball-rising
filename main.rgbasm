@@ -1,3 +1,14 @@
+; Constants
+BUTTON_RIGHT  EQU 0
+BUTTON_LEFT   EQU 1
+BUTTON_UP     EQU 2
+BUTTON_DOWN   EQU 3
+BUTTON_A      EQU 4
+BUTTON_B      EQU 5
+BUTTON_START  EQU 6
+BUTTON_SELECT EQU 7
+
+
 ; Interrupt addresses
 SECTION "Vblank interrupt", ROM0[$0040]
     ld a, $01
@@ -147,23 +158,74 @@ SECTION "main", ROM0[$0150]
 
 
 
-_halt:
-    ; Do nothing, forever
+vblank_loop:
+    ; Main loop: halt, wait for a vblank, then do stuff
     halt
     nop
+    ; TODO is there any reason to do this, versus just checking the register that says whether it was a vblank interrupt?
     ld hl, vblank_flag
     ld a, [hl]
     and a
-    jr z, _halt
+    jr z, vblank_loop
     ld a, $00
     ld [hl], a
 
-    ld hl, oam_buffer + 1
-    ld a, [hl]
-    inc a
-    ld [hl], a
+    ; Use DMA to update object attribute memory.
+    ; Do this FIRST to ensure that it happens before the screen starts to update again.
     call $FF80
-    jr _halt
+
+    ; Poll input
+    ; The direct hardware access is nonsense and unreliable, so just read once per frame and stick all the button states in a byte
+    ld a, $20                   ; read dpad
+    ldh [$ff00], a
+    ld a, [$ff00]               ; unreliable, so do it twice
+    ld a, [$ff00]
+    cpl
+    and a, $0f                  ; mask off just the dpad bits
+    ld b, a                     ; store dpad bits in b
+
+    ld a, $10                   ; read buttons
+    ldh [$ff00], a
+    ld a, [$ff00]               ; even more unreliable!
+    ld a, [$ff00]
+    ld a, [$ff00]
+    ld a, [$ff00]
+    ld a, [$ff00]
+    ld a, [$ff00]
+    cpl
+    and a, $0f
+    swap a
+    or a, b
+    ld hl, buttons
+    ld [hl], a
+
+    ; set b/c to the y/x coordinates
+    ld hl, oam_buffer
+    ld b, [hl]
+    inc hl
+    ld c, [hl]
+    bit BUTTON_LEFT, a
+    jr z, .skip_left
+    dec c
+.skip_left:
+    bit BUTTON_RIGHT, a
+    jr z, .skip_right
+    inc c
+.skip_right:
+    bit BUTTON_UP, a
+    jr z, .skip_up
+    dec b
+.skip_up:
+    bit BUTTON_DOWN, a
+    jr z, .skip_down
+    inc b
+.skip_down:
+    ld [hl], c
+    dec hl
+    ld [hl], b
+
+    ; Loop again when done
+    jr vblank_loop
 
 
 SECTION "Sprites", ROM0
@@ -191,6 +253,8 @@ DMA_BYTECODE:
 
 SECTION "Important twiddles", WRAM0[$C000]
 vblank_flag:
+    db
+buttons:
     db
 
 SECTION "OAM Buffer", WRAM0[$C100]
