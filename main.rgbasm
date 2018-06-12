@@ -38,6 +38,7 @@ SECTION "init", ROM0[$0100]
 
 ; Initialization and whatnot
 SECTION "main", ROM0[$0150]
+main:
     ; Enable interrupts
     ld a, %00000001  ; only vblank
     ldh [$FFFF], a
@@ -63,17 +64,17 @@ SECTION "main", ROM0[$0150]
     ld a, %10000000
     ld [$FF00+$68], a
 
-    ld bc, %0111110000000000  ; red
+    ld bc, %0100111101011100  ; pale yellow
     ld a, c
     ld [$FF00+$69], a
     ld a, b
     ld [$FF00+$69], a
-    ld bc, %0000001111100000  ; green
+    ld bc, %0011111010110101  ; yellowy green
     ld a, c
     ld [$FF00+$69], a
     ld a, b
     ld [$FF00+$69], a
-    ld bc, %0000000000011111  ; blue
+    ld bc, %0000000000011111  ; red
     ld a, c
     ld [$FF00+$69], a
     ld a, b
@@ -84,18 +85,38 @@ SECTION "main", ROM0[$0150]
     ld a, b
     ld [$FF00+$69], a
 
-    ; Set CHR tile 0 to be vertical stripes.  The map defaults to all zeroes,
-    ; so the screen will just fill with this
-    ; TODO i think i'm supposed to only do this with DMA or during a vblank or something??
+    ; Load some basic tiles
     ; TODO wait, i thought the background was at 8800 by default, augh
     ld hl, $8000
-    ld bc, `00112233
-    REPT 8
-    ld a, b
-    ld [hl+], a
-    ld a, c
+    ld bc, EMPTY_SPRITE
+    REPT 16
+    ld a, [bc]
+    inc bc
     ld [hl+], a
     ENDR
+    ld bc, GRASS_SPRITE
+    REPT 16
+    ld a, [bc]
+    inc bc
+    ld [hl+], a
+    ENDR
+
+    ; Fill the screen buffer with a pattern of grass tiles, where every 2x2
+    ; block has a single grass at the top left.  Note that the full screen
+    ; buffer is 32x32 tiles, and it ends at $9c00
+    ld hl, $9800
+.screen_fill_loop:
+    ld a, $01
+    REPT 16
+    ld [hl+], a
+    inc hl
+    ENDR
+    REPT 32
+    inc hl
+    ENDR
+    ld a, h
+    cp a, $9C
+    jr c, .screen_fill_loop
 
 
     ; Same thing but for an object palette
@@ -229,6 +250,24 @@ vblank_loop:
 
 
 SECTION "Sprites", ROM0
+GRASS_SPRITE:
+    dw `00000000
+    dw `00100000
+    dw `00100000
+    dw `00000000
+    dw `00000100
+    dw `00000100
+    dw `00000000
+    dw `00000000
+EMPTY_SPRITE:
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
 ANISE_SPRITE:
     dw `00000000
     dw `00000000
