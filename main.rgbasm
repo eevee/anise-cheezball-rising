@@ -1,3 +1,24 @@
+; Interrupt addresses
+SECTION "Vblank interrupt", ROM0[$0040]
+    ld a, $01
+    ld hl, vblank_flag
+    ld [hl], a
+    ret
+
+SECTION "LCD controller status interrupt", ROM0[$0048]
+    ; I think this happens when the screen is updating and hits a user-specified row, so this is where you'd do stuff like wavy screen effects
+    ret
+
+SECTION "Timer overflow interrupt", ROM0[$0050]
+    ret
+
+SECTION "Serial transfer completion interrupt", ROM0[$0058]
+    ret
+
+SECTION "P10-P13 signal low edge interrupt", ROM0[$0060]
+    ; ???
+    ret
+
 ; Control starts here, but there's more ROM header several bytes later, so the
 ; only thing we can really do is immediately jump to after the header
 SECTION "init", ROM0[$0100]
@@ -6,11 +27,20 @@ SECTION "init", ROM0[$0100]
 
 ; Initialization and whatnot
 SECTION "main", ROM0[$0150]
-    ; TODO enable interrupts?
+    ; Enable interrupts
+    ld a, %00000001  ; only vblank
+    ldh [$FFFF], a
+    ; This instruction enables whichever interrupts are enabled according to FFFF
+    ei
 
     ; Set LCD palette for grayscale mode; yes, it has a palette
     ld a, %11100100
     ld [$FF00+$47], a
+
+    ; LCDC
+    ; TODO document flags etc
+    ld a, %10010111
+    ldh [$ff40], a
 
     ; Set a color palette.  Those aren't exposed directly in main RAM; instead,
     ; you have to write to a register, which will then write the palette to...
@@ -46,6 +76,7 @@ SECTION "main", ROM0[$0150]
     ; Set CHR tile 0 to be vertical stripes.  The map defaults to all zeroes,
     ; so the screen will just fill with this
     ; TODO i think i'm supposed to only do this with DMA or during a vblank or something??
+    ; TODO wait, i thought the background was at 8800 by default, augh
     ld hl, $8000
     ld bc, `00112233
     REPT 8
@@ -55,8 +86,113 @@ SECTION "main", ROM0[$0150]
     ld [hl+], a
     ENDR
 
+
+    ; Same thing but for an object palette
+    ld a, %10000000
+    ld [$FF00+$6A], a
+
+    ld bc, %0000000000000000  ; transparent
+    ld a, c
+    ld [$FF00+$6B], a
+    ld a, b
+    ld [$FF00+$6B], a
+    ld bc, %0010110100100101  ; dark
+    ld a, c
+    ld [$FF00+$6B], a
+    ld a, b
+    ld [$FF00+$6B], a
+    ld bc, %0100000111001101  ; med
+    ld a, c
+    ld [$FF00+$6B], a
+    ld a, b
+    ld [$FF00+$6B], a
+    ld bc, %0100001000010001  ; white
+    ld a, c
+    ld [$FF00+$6B], a
+    ld a, b
+    ld [$FF00+$6B], a
+
+    ; Define an object
+    ld hl, $8800
+    ld bc, ANISE_SPRITE
+    REPT 32
+    ld a, [bc]
+    ld [hl+], a
+    inc bc
+    ENDR
+
+    ; Put an object on the screen, maybe.  Probably not.
+    ; TODO this is so illegal
+    ld hl, oam_buffer
+    ; y-coord
+    ld a, 64
+    ld [hl+], a
+    ; x-coord
+    ld [hl+], a
+    ; chr index
+    ld a, 128
+    ld [hl+], a
+    ; attributes
+    ld a, %00000000
+    ld [hl+], a
+
+    ; DMA something
+    ld bc, DMA_BYTECODE
+    ld hl, $FF80
+    REPT 13
+    ld a, [bc]
+    inc bc
+    ld [hl+], a
+    ENDR
+
+
+
 _halt:
     ; Do nothing, forever
     halt
     nop
+    ld hl, vblank_flag
+    ld a, [hl]
+    and a
+    jr z, _halt
+    ld a, $00
+    ld [hl], a
+
+    ld hl, oam_buffer + 1
+    ld a, [hl]
+    inc a
+    ld [hl], a
+    call $FF80
     jr _halt
+
+
+SECTION "Sprites", ROM0
+ANISE_SPRITE:
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00001333
+    dw `00001323
+    dw `10001233
+    dw `01001333
+    dw `00113332
+    dw `00003002
+    dw `00003002
+
+SECTION "DMA Bytecode", ROM0
+DMA_BYTECODE:
+    db $F5, $3E, $C1, $EA, $46, $FF, $3E, $28, $3D, $20, $FD, $F1, $D9
+
+SECTION "Important twiddles", WRAM0[$C000]
+vblank_flag:
+    db
+
+SECTION "OAM Buffer", WRAM0[$C100]
+oam_buffer:
+    ds 4 * 40
