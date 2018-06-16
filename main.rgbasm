@@ -134,7 +134,13 @@ main:
 
     ; Define an object
     ld hl, $8800
-    ld bc, ANISE_SPRITE
+    ld bc, SPRITE_ANISE_FRONT_1
+    REPT 32
+    ld a, [bc]
+    ld [hl+], a
+    inc bc
+    ENDR
+    ld bc, SPRITE_ANISE_FRONT_2
     REPT 32
     ld a, [bc]
     ld [hl+], a
@@ -142,7 +148,6 @@ main:
     ENDR
 
     ; Put an object on the screen, maybe.  Probably not.
-    ; TODO this is so illegal
     ld hl, oam_buffer
     ; y-coord
     ld a, 64
@@ -151,6 +156,19 @@ main:
     ld [hl+], a
     ; chr index
     ld a, 128
+    ld [hl+], a
+    ; attributes
+    ld a, %00000000
+    ld [hl+], a
+
+    ; y-coord
+    ld a, 64
+    ld [hl+], a
+    ; x-coord
+    add a, 8
+    ld [hl+], a
+    ; chr index
+    ld a, 130
     ld [hl+], a
     ; attributes
     ld a, %00000000
@@ -232,6 +250,12 @@ vblank_loop:
     ld [hl], c
     dec hl
     ld [hl], b
+    ld a, c
+    add a, 8
+    ld hl, oam_buffer + 5
+    ld [hl], a
+    dec hl
+    ld [hl], b
 
     ; Loop again when done
     jr vblank_loop
@@ -239,22 +263,27 @@ vblank_loop:
 
 SECTION "Sprites", ROM0
 PALETTE_BG0:
+    dcolor $80c870
+    dcolor $48b038
     dcolor $ddd49b
     dcolor $aba677
     dcolor $000000
     dcolor $000000
 PALETTE_ANISE:
     dcolor $000000
+    dcolor $204048
+    dcolor $20b0b0
+    dcolor $f8f8f8
     dcolor $284858
     dcolor $687080
     dcolor $888080
 GRASS_SPRITE:
     dw `00000000
-    dw `00100000
-    dw `00100000
     dw `00000000
-    dw `00000100
-    dw `00000100
+    dw `01000100
+    dw `01010100
+    dw `00010000
+    dw `00000000
     dw `00000000
     dw `00000000
 EMPTY_SPRITE:
@@ -283,6 +312,40 @@ ANISE_SPRITE:
     dw `00113332
     dw `00003002
     dw `00003002
+SPRITE_ANISE_FRONT_1:
+    dw `00000111
+    dw `00001222
+    dw `00012222
+    dw `00121222
+    dw `00121122
+    dw `00121111
+    dw `00121122
+    dw `00121312
+    dw `00121313
+    dw `00012132
+    dw `00001211
+    dw `00000123
+    dw `00100123
+    dw `00011133
+    dw `00000131
+    dw `00000010
+SPRITE_ANISE_FRONT_2:
+    dw `11100000
+    dw `22210000
+    dw `22221000
+    dw `22212100
+    dw `22112100
+    dw `11112100
+    dw `22112100
+    dw `21312100
+    dw `31312100
+    dw `23121000
+    dw `11210000
+    dw `32100000
+    dw `32100000
+    dw `33100000
+    dw `13100000
+    dw `01000000
 
 SECTION "Important twiddles", WRAM0[$C000]
 vblank_flag:
