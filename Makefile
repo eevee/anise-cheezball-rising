@@ -1,4 +1,4 @@
-TARGET := gamegirl.gbc
+TARGET := anise-cheezball-rising.gbc
 
 all: $(TARGET)
 
