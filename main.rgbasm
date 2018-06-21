@@ -18,9 +18,10 @@ _b = ((\1) & $0000ff) >> 0  >> 3
 
 ; Interrupt addresses
 SECTION "Vblank interrupt", ROM0[$0040]
-    ld a, $01
+    push hl
     ld hl, vblank_flag
-    ld [hl], a
+    ld [hl], 1
+    pop hl
     reti
 
 SECTION "LCD controller status interrupt", ROM0[$0048]
@@ -83,44 +84,36 @@ main:
     ld a, %10000000
     ld [$FF00+$68], a
 
-    ld hl, PALETTE_BG0
+    ld hl, TEST_PALETTES
     REPT 8
     ld a, [hl+]
     ld [$FF00+$69], a
     ENDR
 
     ; Load some basic tiles
-    ; TODO wait, i thought the background was at 8800 by default, augh
     ld hl, $8000
-    ld bc, EMPTY_SPRITE
+    ld bc, TEST_TILES
+    ld d, 100
+.tile_loop:
     REPT 16
     ld a, [bc]
     inc bc
     ld [hl+], a
     ENDR
-    ld bc, GRASS_SPRITE
-    REPT 16
-    ld a, [bc]
-    inc bc
-    ld [hl+], a
-    ENDR
+    dec d
+    jr nz, .tile_loop
 
     ; Fill the screen buffer with a pattern of grass tiles, where every 2x2
     ; block has a single grass at the top left.  Note that the full screen
     ; buffer is 32x32 tiles, and it ends at $9c00
     ld hl, $9800
+    ld bc, TEST_MAP_1
 .screen_fill_loop:
-    ld a, $01
-    REPT 16
+    REPT 1024
+    ld a, [bc]
     ld [hl+], a
-    inc hl
+    inc bc
     ENDR
-    REPT 32
-    inc hl
-    ENDR
-    ld a, h
-    cp a, $9C
-    jr c, .screen_fill_loop
 
 
     ; Same thing but for an object palette
@@ -286,6 +279,15 @@ GRASS_SPRITE:
     dw `00000000
     dw `00000000
     dw `00000000
+BRICK_SPRITE:
+    dw `00010000
+    dw `00010000
+    dw `00010000
+    dw `11111111
+    dw `00000001
+    dw `00000001
+    dw `00000001
+    dw `11111111
 EMPTY_SPRITE:
     dw `00000000
     dw `00000000
@@ -356,3 +358,5 @@ buttons:
 SECTION "OAM Buffer", WRAM0[$C100]
 oam_buffer:
     ds 4 * 40
+
+include "testmap.rgbasm"
