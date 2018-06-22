@@ -47,7 +47,7 @@ SECTION "init", ROM0[$0100]
 SECTION "main", ROM0[$0150]
 ; DMA copy routine, not used directly but copied into high RAM at startup
 dma_copy:
-    ld a, $c1
+    ld a, HIGH(oam_buffer)
     ldh [$ff46], a              ; begin transfer
     ld a, 40                    ; wait for 160 cycles
 .loop:
