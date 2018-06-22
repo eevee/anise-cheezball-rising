@@ -1,4 +1,7 @@
+
 ; Constants
+INCLUDE "hardware.inc"
+
 BUTTON_RIGHT  EQU 0
 BUTTON_LEFT   EQU 1
 BUTTON_UP     EQU 2
@@ -59,19 +62,19 @@ dma_copy_end:
 
 main:
     ; Enable interrupts
-    ld a, %00000001  ; only vblank
-    ldh [$FFFF], a
+    ld a, IEF_VBLANK
+    ldh [rIE], a
     ; This instruction enables whichever interrupts are enabled according to FFFF
     ei
 
     ; Set LCD palette for grayscale mode; yes, it has a palette
     ld a, %11100100
-    ld [$FF00+$47], a
+    ldh [rBGP], a
 
     ; LCDC
     ; TODO document flags etc
-    ld a, %10010111
-    ldh [$ff40], a
+    ld a, LCDCF_ON | LCDCF_WIN9800 | LCDCF_WINOFF | LCDCF_BG8000 | LCDCF_BG9800 | LCDCF_OBJ16 | LCDCF_OBJON | LCDCF_BGON
+    ldh [rLCDC], a
 
     ; Set a color palette.  Those aren't exposed directly in main RAM; instead,
     ; you have to write to a register, which will then write the palette to...
@@ -81,12 +84,12 @@ main:
     ; auto-increments every time we write to the write register, meaning...
     ; well, it looks like this.
     ld a, %10000000
-    ld [$FF00+$68], a
+    ldh [rBCPS], a
 
     ld hl, PALETTE_BG0
     REPT 8
     ld a, [hl+]
-    ld [$FF00+$69], a
+    ldh [rBCPD], a
     ENDR
 
     ; Load some basic tiles
@@ -125,11 +128,11 @@ main:
 
     ; Same thing but for an object palette
     ld a, %10000000
-    ldh [$ff6a], a
+    ldh [rOCPS], a
     ld hl, PALETTE_ANISE
     REPT 8
     ld a, [hl+]
-    ldh [$ff6b], a
+    ldh [rOCPD], a
     ENDR
 
     ; Define an object
@@ -204,21 +207,21 @@ vblank_loop:
     ; Poll input
     ; The direct hardware access is nonsense and unreliable, so just read once per frame and stick all the button states in a byte
     ld a, $20                   ; read dpad
-    ldh [$ff00], a
-    ld a, [$ff00]               ; unreliable, so do it twice
-    ld a, [$ff00]
+    ldh [rP1], a
+    ld a, [rP1]               ; unreliable, so do it twice
+    ld a, [rP1]
     cpl
     and a, $0f                  ; mask off just the dpad bits
     ld b, a                     ; store dpad bits in b
 
     ld a, $10                   ; read buttons
-    ldh [$ff00], a
-    ld a, [$ff00]               ; even more unreliable!
-    ld a, [$ff00]
-    ld a, [$ff00]
-    ld a, [$ff00]
-    ld a, [$ff00]
-    ld a, [$ff00]
+    ldh [rP1], a
+    ld a, [rP1]               ; even more unreliable!
+    ld a, [rP1]
+    ld a, [rP1]
+    ld a, [rP1]
+    ld a, [rP1]
+    ld a, [rP1]
     cpl
     and a, $0f
     swap a
