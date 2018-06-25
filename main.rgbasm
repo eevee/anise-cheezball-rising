@@ -8,6 +8,13 @@ BUTTON_B      EQU 5
 BUTTON_START  EQU 6
 BUTTON_SELECT EQU 7
 
+FACING_DOWN   EQU 0
+FACING_UP     EQU 1
+FACING_LEFT   EQU 2
+FACING_RIGHT  EQU 3
+
+ANIMATION_LENGTH EQU 5
+
 dcolor: MACRO  ; COLOR($rrggbb) -> gbc representation
 _r = ((\1) & $ff0000) >> 16 >> 3
 _g = ((\1) & $00ff00) >> 8  >> 3
@@ -38,15 +45,25 @@ SECTION "P10-P13 signal low edge interrupt", ROM0[$0060]
     ; ???
     reti
 
+DisableLCD: MACRO
+    ld a, [$ff40]
+    and a, %01111111
+    ld [$ff40], a
+ENDM
+
+EnableLCD: MACRO
+    ld a, [$ff40]
+    or a, %10000000
+    ld [$ff40], a
+ENDM
+
 ; Control starts here, but there's more ROM header several bytes later, so the
 ; only thing we can really do is immediately jump to after the header
 SECTION "init", ROM0[$0100]
     nop
     jp main
 
-; Initialization and whatnot
-SECTION "main", ROM0[$0150]
-; DMA copy routine, not used directly but copied into high RAM at startup
+SECTION "whatever", ROM0
 dma_copy:
     ld a, $c1
     ldh [$ff46], a              ; begin transfer
@@ -58,6 +75,9 @@ dma_copy:
 dma_copy_end:
     nop
 
+; Initialization and whatnot
+SECTION "main", ROM0[$0150]
+; DMA copy routine, not used directly but copied into high RAM at startup
 main:
     ; Enable interrupts
     ld a, %00000001  ; only vblank
@@ -65,13 +85,22 @@ main:
     ; This instruction enables whichever interrupts are enabled according to FFFF
     ei
 
+.wait_for_vblank:
+    halt
+    nop
+    ld a, [vblank_flag]
+    and a
+    jr z, .wait_for_vblank
+    ld a, 0
+    ld [vblank_flag], a
+
     ; Set LCD palette for grayscale mode; yes, it has a palette
-    ld a, %11100100
+    ld a, %01100100
     ld [$FF00+$47], a
 
     ; LCDC
     ; TODO document flags etc
-    ld a, %10010111
+    ld a, %00000111
     ldh [$ff40], a
 
     ; Set a color palette.  Those aren't exposed directly in main RAM; instead,
@@ -91,7 +120,7 @@ main:
     ENDR
 
     ; Load some basic tiles
-    ld hl, $8000
+    ld hl, $9000
     ld bc, TEST_TILES
     ld d, 100
 .tile_loop:
@@ -119,52 +148,78 @@ main:
     ; Same thing but for an object palette
     ld a, %10000000
     ldh [$ff6a], a
-    ld hl, PALETTE_ANISE
-    REPT 8
+    ld hl, ANISE_TEST_PALETTES
+    REPT 16
     ld a, [hl+]
     ldh [$ff6b], a
     ENDR
 
     ; Define an object
-    ld hl, $8800
-    ld bc, SPRITE_ANISE_FRONT_1
-    REPT 32
+    ld hl, $8000
+    ld bc, ANISE_TEST_TILES
+    ld d, 24
+.tile_loop2:
+    REPT 16
     ld a, [bc]
-    ld [hl+], a
     inc bc
-    ENDR
-    ld bc, SPRITE_ANISE_FRONT_2
-    REPT 32
-    ld a, [bc]
     ld [hl+], a
-    inc bc
     ENDR
+    dec d
+    jr nz, .tile_loop2
+
+    ld a, FACING_DOWN
+    ld [anise_facing], a
+    ld a, ANIMATION_LENGTH
+    ld [anise_frame_countdown], a
 
     ; Put an object on the screen, maybe.  Probably not.
+
+    ; ANTENNA
+    ld b, 64
+    ld c, 64
     ld hl, oam_buffer
     ; y-coord
-    ld a, 64
+    ld a, c
+    sub a, 6
     ld [hl+], a
     ; x-coord
+    ld a, b
+    add a, 6
     ld [hl+], a
     ; chr index
-    ld a, 128
+    ld a, 0
     ld [hl+], a
     ; attributes
     ld a, %00000000
     ld [hl+], a
 
+    ; LEFT PART
     ; y-coord
-    ld a, 64
+    ld a, c
     ld [hl+], a
     ; x-coord
+    ld a, b
+    ld [hl+], a
+    ; chr index
+    ld a, 2
+    ld [hl+], a
+    ; attributes
+    ld a, %00000001
+    ld [hl+], a
+
+    ; RIGHT PART
+    ; y-coord
+    ld a, c
+    ld [hl+], a
+    ; x-coord
+    ld a, b
     add a, 8
     ld [hl+], a
     ; chr index
-    ld a, 130
+    ld a, 4
     ld [hl+], a
     ; attributes
-    ld a, %00000000
+    ld a, %00000001
     ld [hl+], a
 
     ; DMA something
@@ -175,6 +230,8 @@ main:
     inc bc
     ld [hl+], a
     ENDR
+
+    EnableLCD
 
 
 
@@ -217,41 +274,141 @@ vblank_loop:
     swap a
     or a, b
     ld hl, buttons
+    ; TODO populate buttons_pressed, buttons_released
+    ;ld b, [hl]
+    
     ld [hl], a
 
+    ; OK, uh, so, what do i need here
+    ; 0. SPRITE
+    ; 1. POSE
+    ; 2. ANGLE
+    ; 3. FRAME
+    ; sprites all begin at ANISE_TEST_TILES
+    ; a pose is really a list of frames
+    ; so, anise data should include:
+    ; 
+;ANISE_SPRITES EQU ANISE_TEST_TILES
+ANISE_SPRITE_COUNT EQU 4
+ANISE_SPRITE_PARTS EQU 3
+ANISE_SPRITE_UNIQUE EQU 1
+ANISE_SPRITE_ANGLED EQU 1
+
+; update facing
+; handle movement [OK]
+; decide pose
+; update portrait
+
+    ; Anise update loop
     ; set b/c to the y/x coordinates
-    ld hl, oam_buffer
-    ld b, [hl]
-    inc hl
-    ld c, [hl]
+    ld bc, 4
+    ; d: is there any movement at all?
+    ld d, 0
     bit BUTTON_LEFT, a
     jr z, .skip_left
-    dec c
+    ld d, 1
+    ld hl, oam_buffer + 1
+    dec [hl]
+    add hl, bc
+    dec [hl]
+    add hl, bc
+    dec [hl]
 .skip_left:
     bit BUTTON_RIGHT, a
     jr z, .skip_right
-    inc c
+    ld d, 1
+    ld hl, oam_buffer + 1
+    inc [hl]
+    add hl, bc
+    inc [hl]
+    add hl, bc
+    inc [hl]
 .skip_right:
     bit BUTTON_UP, a
     jr z, .skip_up
-    dec b
+    ld d, 1
+    ld hl, oam_buffer
+    dec [hl]
+    add hl, bc
+    dec [hl]
+    add hl, bc
+    dec [hl]
 .skip_up:
     bit BUTTON_DOWN, a
     jr z, .skip_down
-    inc b
+    ld d, 1
+    ld hl, oam_buffer
+    inc [hl]
+    add hl, bc
+    inc [hl]
+    add hl, bc
+    inc [hl]
 .skip_down:
-    ld [hl], c
-    dec hl
-    ld [hl], b
-    ld a, c
-    add a, 8
-    ld hl, oam_buffer + 5
-    ld [hl], a
-    dec hl
-    ld [hl], b
+
+    ld a, d
+    cp a, 0
+    jp z, .no_movement
+
+    ld a, [anise_frame_countdown]
+    dec a
+    ld [anise_frame_countdown], a
+    jp nz, .no_movement
+    ; TODO i jump when it hits zero, so will this skip a frame, or no because this is one of the frames
+    ld a, ANIMATION_LENGTH
+    ld [anise_frame_countdown], a
+    
+    ld a, [anise_frame]
+    inc a
+    and a, 4 - 1
+    ld [anise_frame], a
+
+    ; Anise has a unique sprite, so overwrite the current tile rather than
+    ; changing tiles
+    ld hl, ANISE_TEST_TILES
+    ; Skip ahead 3 sprites * the current frame
+.advance_frame:    
+    cp a, 0
+    jr z, .done_advancing_frame
+    ld bc, 3 * 2 * 8 * 2
+    add hl, bc
+    dec a
+    jr .advance_frame
+.done_advancing_frame:
+    ld b, h
+    ld c, l
+    ld hl, $8000
+    REPT 32 * 3
+    ld a, [bc]
+    inc bc
+    ld [hl+], a
+    ENDR
+
+
+.no_movement:
 
     ; Loop again when done
-    jr vblank_loop
+    jp vblank_loop
+
+
+SECTION "Utility code", ROM0
+; copy d bytes from bc to hl
+copy:
+.loop:
+    ld a, [bc]
+    inc bc
+    ld [hl+], a
+    dec d
+    jr z, .loop
+    ret
+
+
+SECTION "Actor data", ROM0
+ANISE_ACTOR_INFO:
+    dw ANISE_TEST_TILES
+    ; Idle pose
+    db 0, 1
+    ; Walk pose
+    db 0, 4
 
 
 SECTION "Sprites", ROM0
@@ -354,9 +511,24 @@ vblank_flag:
     db
 buttons:
     db
+buttons_pressed:
+    db
+buttons_released:
+    db
+anise_facing:
+    db
+anise_pose:
+    db
+anise_obj:
+    db
+anise_frame:
+    db
+anise_frame_countdown:
+    db
 
 SECTION "OAM Buffer", WRAM0[$C100]
 oam_buffer:
     ds 4 * 40
 
 include "testmap.rgbasm"
+include "testanise.rgbasm"

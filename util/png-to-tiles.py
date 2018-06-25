@@ -8,6 +8,7 @@ import PIL.Image
 TILE_SIZE = 8
 METATILE_SIZE = 16
 
+
 def main(tiled_map_path):
     # I have:
     # - a tileset image made out of 16x16 tiles
@@ -142,6 +143,76 @@ def main(tiled_map_path):
             subtiles = big_tile_subtiles[tile]
             print(f"    db {subtiles[2]}, {subtiles[3]}")
 
+
+def main(image_path):
+    print("SECTION \"Image dumping test\", ROM0")
+
+    im = PIL.Image.open(image_path)
+    width, height = im.size
+
+    # -------------------------------------------------------------------------
+
+    # Get the palette.  There's a getpalette() method, but the palette it
+    # returns has been padded to 256 colors for some reason, which makes it
+    # useless for our purposes.  Instead, check out the poorly-documented
+    # palette attribute, which has the palette as a flat list of channels.
+    # God, I hate PIL.
+    if im.palette is None:
+        print("This tool only works on paletted PNGs!", file=sys.stderr)
+        sys.exit(1)
+
+    pal = im.palette.palette
+    # TODO?  or divisible by four?  if len(pal) != 32:
+    gbc_palettes = []
+    asm_colors = []
+    print("TEST_PALETTES:")
+    for i in range(0, len(pal), 12):
+        gbc_palette = []
+        for j in range(i, i + 12, 3):
+            r, g, b = color = pal[j:j + 3]
+            gbc_palette.append(color)
+
+            # Convert to RGB555
+            asm_color = (r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10)
+            asm_colors.append(asm_color)
+            print(f"    dw %{asm_color:016b}")
+
+        gbc_palettes.append(tuple(gbc_palette))
+
+    for _ in range(len(asm_colors), 32):
+        print("    dw 0")
+
+    # -------------------------------------------------------------------------
+
+    print("TEST_TILES:")
+
+    # TODO if two colors in different palettes are identical, Do The Right
+    # Thing (vastly more complicated but worth it i think)
+    pixels = im.load()
+    small_tile_index = 0
+    # Flat list of the four little tiles that make up each big tile
+    big_tile_subtiles = {}
+    for ty2 in range(0, height, TILE_SIZE * 2):
+        for tx in range(0, width, TILE_SIZE):
+            for ty in (ty2, ty2 + TILE_SIZE):
+                print(f"    ; tile {small_tile_index} at {tx}, {ty}")
+                #seen_pixels = {}
+                big_tile_index = (ty // METATILE_SIZE) * (width // METATILE_SIZE) + (tx // METATILE_SIZE)
+                big_tile_subtiles.setdefault(big_tile_index, []).append(small_tile_index)
+                for y in range(TILE_SIZE):
+                    print('    dw `', end='')
+                    for x in range(TILE_SIZE):
+                        px = pixels[tx + x, ty + y]
+                        #index = seen_pixels.setdefault(px, len(seen_pixels))
+                        index = px % 4
+                        # TODO track the palette this tile uses
+                        print(index, end='')
+                    print()
+                small_tile_index += 1
+
+    print(); print()
+    print(small_tile_index)
+    import pprint; pprint.pprint(big_tile_subtiles)
 
 
 if __name__ == '__main__':
