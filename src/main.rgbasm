@@ -530,5 +530,5 @@ SECTION "OAM Buffer", WRAM0[$C100]
 oam_buffer:
     ds 4 * 40
 
-include "testmap.rgbasm"
-include "testanise.rgbasm"
+include "tilesets/testmap.rgbasm"
+include "tilesets/testanise.rgbasm"
