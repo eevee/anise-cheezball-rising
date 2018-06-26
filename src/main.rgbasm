@@ -10,8 +10,8 @@ BUTTON_SELECT EQU 7
 
 FACING_DOWN   EQU 0
 FACING_UP     EQU 1
-FACING_LEFT   EQU 2
-FACING_RIGHT  EQU 3
+FACING_RIGHT  EQU 2
+FACING_LEFT   EQU 3
 
 ANIMATION_LENGTH EQU 5
 
@@ -271,13 +271,22 @@ vblank_loop:
     ld a, [$ff00]
     cpl
     and a, $0f
-    swap a
-    or a, b
+    swap a                      ; put face buttons in high nybble
+    or a, b                     ; combine with dpad buttons
+
+    ; a now contains the current buttons
     ld hl, buttons
-    ; TODO populate buttons_pressed, buttons_released
-    ;ld b, [hl]
-    
-    ld [hl], a
+    ld b, [hl]                  ; b <- previous buttons
+    ld [hl], a                  ; a -> current buttons
+    cpl
+    and a, b
+    ld [buttons_released], a    ; a = ~new & old, i.e. released
+    ld a, [hl]                  ; a <- current buttons
+    cpl
+    or a, b
+    cpl
+    ld [buttons_pressed], a     ; a = ~(~new | old), i.e. pressed
+    ld a, [hl]                  ; leave current buttons in a
 
     ; OK, uh, so, what do i need here
     ; 0. SPRITE
@@ -345,6 +354,30 @@ ANISE_SPRITE_ANGLED EQU 1
     inc [hl]
 .skip_down:
 
+    ; Figure out which way we're facing, based on which (if any) button is newly-pressed this frame
+    ; TODO hey i could just keep shifting and...  wait is there any point to that, maybe it's faster?
+    ld hl, anise_facing
+    ld a, [buttons_pressed]
+    bit BUTTON_LEFT, a
+    jr z, .skip_left2
+    ld [hl], FACING_LEFT
+    jr .skip_down2
+.skip_left2:
+    bit BUTTON_RIGHT, a
+    jr z, .skip_right2
+    ld [hl], FACING_RIGHT
+    jr .skip_down2
+.skip_right2:
+    bit BUTTON_UP, a
+    jr z, .skip_up2
+    ld [hl], FACING_UP
+    jr .skip_down2
+.skip_up2:
+    bit BUTTON_DOWN, a
+    jr z, .skip_down2
+    ld [hl], FACING_DOWN
+.skip_down2:
+
     ld a, d
     cp a, 0
     jp z, .no_movement
@@ -357,19 +390,36 @@ ANISE_SPRITE_ANGLED EQU 1
     ld a, ANIMATION_LENGTH
     ld [anise_frame_countdown], a
     
+    ; Anise has a unique sprite, so overwrite the current tile rather than
+    ; changing tiles
+    ld hl, ANISE_TEST_TILES
+
+    ; Skip ahead a number of /rows/ of tiles, corresponding to anise's facing
+    ld a, [anise_facing]
+    and a, %11                      ; cap to 4, just in case
+    ; TODO unhardcode frame count (oof)
+    ld bc, 4 * 3 * 2 * 16           ; frames * parts * tiles * bytes per tile
+.skip_facing_row:
+    cp a, 0
+    jr z, .done_skip_facing_row
+    add hl, bc
+    dec a
+    jr .skip_facing_row
+.done_skip_facing_row:
+
+    ; Note that this part always needs to happen!!  I'm just doing it here to
+    ; avoid loading anise_frame again in the next bit
+    ; TODO need to reset the frame when direction changes (and when pose changes)
     ld a, [anise_frame]
     inc a
     and a, 4 - 1
     ld [anise_frame], a
 
-    ; Anise has a unique sprite, so overwrite the current tile rather than
-    ; changing tiles
-    ld hl, ANISE_TEST_TILES
     ; Skip ahead 3 sprites * the current frame
+    ld bc, 3 * 2 * 16               ; parts * tiles * bytes per tile
 .advance_frame:    
     cp a, 0
     jr z, .done_advancing_frame
-    ld bc, 3 * 2 * 8 * 2
     add hl, bc
     dec a
     jr .advance_frame
