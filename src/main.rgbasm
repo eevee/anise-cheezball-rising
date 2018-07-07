@@ -288,6 +288,10 @@ vblank_loop:
     or a, b
     cpl
     ld [buttons_pressed], a     ; a = ~(~new | old), i.e. pressed
+    ; TODO EXTRA
+    bit BUTTON_A, a
+    jp nz, .do_show_dialogue
+    ; TODO END EXTRA
     ld a, [hl]                  ; leave current buttons in a
 
     ; OK, uh, so, what do i need here
@@ -441,6 +445,10 @@ ANISE_SPRITE_ANGLED EQU 1
     ; Loop again when done
     jp vblank_loop
 
+.do_show_dialogue:
+    call show_dialogue
+    jp vblank_loop
+
 
 SECTION "Utility code", ROM0
 ; copy d bytes from bc to hl
@@ -584,3 +592,237 @@ oam_buffer:
 
 include "tilesets/testmap.rgbasm"
 include "tilesets/testanise.rgbasm"
+
+SECTION "Stuff??", ROMX
+; FONT
+font:
+; A
+    db 6
+    dw `00000000
+    dw `00000000
+    dw `01110000
+    dw `10001000
+    dw `10001000
+    dw `10001000
+    dw `11111000
+    dw `10001000
+    dw `10001000
+    dw `10001000
+    dw `10001000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+; B
+    db 6
+    dw `00000000
+    dw `00000000
+    dw `11110000
+    dw `10001000
+    dw `10001000
+    dw `10001000
+    dw `11110000
+    dw `10001000
+    dw `10001000
+    dw `10001000
+    dw `11110000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+    dw `00000000
+
+text:
+    db "AB", 0
+    db "ABABAAA", 0
+
+PALETTE_TEXT:
+    dcolor $000000
+    dcolor $ffffff
+    dcolor $999999
+    dcolor $666666
+
+show_dialogue:
+    ; TODO blank out the second half of bank 1 before all this, maybe on the fly to average out the cpu time
+
+    ; TODO get rid of this with a slide-up effect
+    DisableLCD
+
+    ; Set up palette
+    ld a, %10111000
+    ld [rBCPS], a
+    ld hl, PALETTE_TEXT
+    REPT 8
+    ld a, [hl+]
+    ld [rBCPD], a
+    ENDR
+
+    ; Fill text rows with tiles (blank border, custom tiles)
+    ld hl, $9800 + 32 * 14
+    ; Top row, all tile 255
+    ld a, 255
+    ld c, 32
+.loop1:
+    ld [hl+], a
+    dec c
+    jr nz, .loop1
+    ; Text row 1: 255 on the edges, then middle goes 128, 130, ...
+    ld a, 255
+    ld [hl+], a
+    ld a, 128
+    ld c, 30
+.loop2:
+    ld [hl+], a
+    add a, 2
+    dec c
+    jr nz, .loop2
+    ld a, 255
+    ld [hl+], a
+    ; Text row 2: same as above, but middle is 129, 131, ...
+    ld a, 255
+    ld [hl+], a
+    ld a, 129
+    ld c, 30
+.loop3:
+    ld [hl+], a
+    add a, 2
+    dec c
+    jr nz, .loop3
+    ld a, 255
+    ld [hl+], a
+    ; Bottom row, all tile 255
+    ld a, 255
+    ld c, 32
+.loop4:
+    ld [hl+], a
+    dec c
+    jr nz, .loop4
+
+    ; Repeat all of the above, but in bank 1, which specifies the character bank and palette.  Luckily, that's the same for everyone.
+    ld a, 1
+    ldh [rVBK], a
+    ld a, %00001111  ; bank 1, palette 7
+    ld hl, $9800 + 32 * 14
+    ; Top row, all tile 255
+    ld c, 32 * 4  ; 4 rows
+.loop5:
+    ld [hl+], a
+    dec c
+    jr nz, .loop5
+
+    EnableLCD
+
+    ; ----------------------------------------------------------
+    ; Setup done!  Real work begins here
+    ; b: x-offset within current tile
+    ; de: text cursor + current character tiles
+    ; hl: current VRAM tile being drawn into
+    ld b, 0
+    ld de, text
+    ld hl, $8800
+.next_letter:
+    EnableLCD  ; TODO get rid of me with a buffer
+    call wait_for_vblank        ; always wait before drawing
+    DisableLCD  ; TODO get rid of me with a buffer
+
+    ld a, [de]                  ; get current character
+    and a                       ; if NUL, we're done!
+    jr z, .done
+    inc de                      ; otherwise, increment
+
+    ; Get the font character
+    push de                     ; from here, de is tiles
+    ; Alas, I can only add to hl, so I need to compute the font
+    ; character address in hl and /then/ put it in de.  But I
+    ; already pushed de, so I can use that as scratch space.
+    push hl
+    sub a, 65   ; TODO temporary
+    ld hl, font
+    ld de, 33                   ; 1 width byte + 16 * 2 tiles
+    ; TODO can we speed striding up with long mult?
+    and a
+.letter_stride:
+    jr z, .skip_letter_stride
+    add hl, de
+    dec a
+    jr .letter_stride
+.skip_letter_stride:
+    ld d, h                     ; move char tile addr to de
+    ld e, l
+    pop hl                      ; restore hl (VRAM)
+
+    ld a, [de]                  ; read width
+    inc de
+
+    ; Copy into current tiles
+    ; Part 1: Copy into the right of the current tiles
+    push af                     ; stash width
+    ld c, 32
+    inc b   ; FIXME? this makes the loop simpler since i only test after the dec, but it also is the 1px kerning between characters...
+.row_copy:
+    ld a, [de]                  ; read next row of character
+    ; Perform shift
+    push bc                     ; preserve b while shifting
+    dec b
+.shift:                         ; shift right by b bits
+    jr z, .done_shift
+    ; TODO rra is faster, but rotates
+    srl a
+    dec b
+    jr .shift
+.done_shift:
+    pop bc
+    ; Draw to VRAM
+    or a, [hl]                  ; OR with current tile
+    ld [hl+], a
+    inc de
+    dec c
+    jr nz, .row_copy
+    pop af                      ; restore width
+
+    ; Part 2: Copy into the left of a new tile, if necessary
+    ; TODO
+
+    ; Cleanup for next iteration
+    ; It's possible we overflowed into the next tile, in which
+    ; case we want to leave hl where it is: pointing at the next
+    ; tile.  Otherwise, we need to back it up to where it was.
+    ; Of course, we also need to increment b, the x offset.
+    ; TODO it's possible we're at 9 pixels wide, thanks to the
+    ; kerning pixel
+    ; TODO actually that might make something weird happen due
+    ; to the inc b above, maybe...?
+    add a, b                    ; a <- new x offset
+    cp a, 7
+    jr c, .wrap_to_next_tile
+    ld bc, -32                  ; a < 8: back hl up
+    add hl, bc
+    jr .done_wrap
+.wrap_to_next_tile:
+    sub a, 8                    ; a >= 8: subtract tile width
+    ld b, a
+.done_wrap:
+    ld b, a                     ; either way, store into b
+
+    ; Loop
+    pop de                      ; pop text pointer
+    jr .next_letter
+
+.done:
+    EnableLCD  ; TODO get rid of me with a buffer
+    ; Remember to reset bank to 0!
+    xor a
+    ldh [rVBK], a
+    ret
+
+
+wait_for_vblank:
+    xor a                       ; clear the vblank flag
+    ld [vblank_flag], a
+.vblank_loop:
+    halt                        ; wait for interrupt
+    ld a, [vblank_flag]         ; was it a vblank interrupt?
+    and a
+    jr z, .vblank_loop          ; if not, keep waiting
+    ret
