@@ -82,7 +82,7 @@ SECTION "main", ROM0[$0150]
 ; DMA copy routine, not used directly but copied into high RAM at startup
 main:
     ; Enable interrupts
-    ld a, %00000001  ; only vblank
+    ld a, IEF_VBLANK
     ldh [rIE], a
     ; This instruction enables whichever interrupts are enabled according to FFFF
     ei
@@ -134,18 +134,14 @@ main:
     dec d
     jr nz, .tile_loop
 
-    ; Fill the screen buffer with a pattern of grass tiles, where every 2x2
-    ; block has a single grass at the top left.  Note that the full screen
-    ; buffer is 32x32 tiles, and it ends at $9c00
+    ; Read from the test map
+    ; TODO good candidate for DMA...?  or maybe not since i should really only be filling the visible screen area
     ld hl, $9800
-    ld bc, TEST_MAP_1
-.screen_fill_loop:
-    REPT 1024
-    ld a, [bc]
-    ld [hl+], a
-    inc bc
+    ld de, TEST_MAP_1
+    REPT 8
+    ld c, 128
+    call copy
     ENDR
-
 
     ; Same thing but for an object palette
     ld a, %10000000
@@ -430,14 +426,11 @@ ANISE_SPRITE_ANGLED EQU 1
     dec a
     jr .advance_frame
 .done_advancing_frame:
-    ld b, h
-    ld c, l
+    ld d, h
+    ld e, l
     ld hl, $8000
-    REPT 32 * 3
-    ld a, [bc]
-    inc bc
-    ld [hl+], a
-    ENDR
+    ld c, 32 * 3
+    call copy
 
 
 .no_movement:
@@ -451,14 +444,14 @@ ANISE_SPRITE_ANGLED EQU 1
 
 
 SECTION "Utility code", ROM0
-; copy d bytes from bc to hl
+; copy c bytes from de to hl
 copy:
 .loop:
-    ld a, [bc]
-    inc bc
+    ld a, [de]
+    inc de
     ld [hl+], a
-    dec d
-    jr z, .loop
+    dec c
+    jr nz, .loop
     ret
 
 
