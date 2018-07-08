@@ -249,46 +249,11 @@ vblank_loop:
     ; Do this FIRST to ensure that it happens before the screen starts to update again.
     call $FF80
 
-    ; Poll input
-    ; The direct hardware access is nonsense and unreliable, so just read once per frame and stick all the button states in a byte
-    ld a, $20                   ; read dpad
-    ldh [rP1], a
-    ld a, [rP1]                 ; unreliable, so do it twice
-    ld a, [rP1]
-    cpl
-    and a, $0f                  ; mask off just the dpad bits
-    ld b, a                     ; store dpad bits in b
+    call read_input
 
-    ld a, $10                   ; read buttons
-    ldh [rP1], a
-    ld a, [rP1]                 ; even more unreliable!
-    ld a, [rP1]
-    ld a, [rP1]
-    ld a, [rP1]
-    ld a, [rP1]
-    ld a, [rP1]
-    cpl
-    and a, $0f
-    swap a                      ; put face buttons in high nybble
-    or a, b                     ; combine with dpad buttons
-
-    ; a now contains the current buttons
-    ld hl, buttons
-    ld b, [hl]                  ; b <- previous buttons
-    ld [hl], a                  ; a -> current buttons
-    cpl
-    and a, b
-    ld [buttons_released], a    ; a = ~new & old, i.e. released
-    ld a, [hl]                  ; a <- current buttons
-    cpl
-    or a, b
-    cpl
-    ld [buttons_pressed], a     ; a = ~(~new | old), i.e. pressed
-    ; TODO EXTRA
+    ld a, [buttons_pressed]
     bit BUTTON_A, a
     jp nz, .do_show_dialogue
-    ; TODO END EXTRA
-    ld a, [hl]                  ; leave current buttons in a
 
     ; OK, uh, so, what do i need here
     ; 0. SPRITE
@@ -311,6 +276,7 @@ ANISE_SPRITE_ANGLED EQU 1
 ; update portrait
 
     ; Anise update loop
+    ld a, [buttons]
     ; set b/c to the y/x coordinates
     ld bc, 4
     ; d: is there any movement at all?
@@ -443,16 +409,67 @@ ANISE_SPRITE_ANGLED EQU 1
     jp vblank_loop
 
 
+; populates buttons, buttons_released, buttons_pressed
+; NOTE: trashes a, b, hl
+read_input:
+    ; Populating the request bits is asynchronous, and we need a
+    ; slight delay to get a reliable read, which is most easily
+    ; done by just reading several times.  This comes from the
+    ; manual so it oughta be correct
+    ld a, $20                   ; read dpad
+    ldh [rP1], a
+    ld a, [rP1]
+    ld a, [rP1]
+    cpl                         ; zero bits indicate presses!
+    and a, $0f                  ; mask off just the dpad bits
+    ld b, a                     ; store dpad bits in b
+
+    ld a, $10                   ; read buttons
+    ldh [rP1], a
+    ld a, [rP1]                 ; even more unreliable!
+    ld a, [rP1]
+    ld a, [rP1]
+    ld a, [rP1]
+    ld a, [rP1]
+    ld a, [rP1]
+    cpl
+    and a, $0f
+    swap a                      ; put face buttons in high nybble
+    or a, b                     ; combine with dpad buttons
+
+    ; a now contains the current buttons
+    ld hl, buttons
+    ld b, [hl]                  ; b <- previous buttons
+    ld [hl], a                  ; a -> current buttons
+    cpl
+    and a, b
+    ld [buttons_released], a    ; a = ~new & old, i.e. released
+    ld a, [hl]                  ; a <- current buttons
+    cpl
+    or a, b
+    cpl
+    ld [buttons_pressed], a     ; a = ~(~new | old), i.e. pressed
+    ret
+
 SECTION "Utility code", ROM0
 ; copy c bytes from de to hl
+; NOTE: c must not be zero
 copy:
-.loop:
     ld a, [de]
     inc de
     ld [hl+], a
     dec c
-    jr nz, .loop
+    jr nz, copy
     ret
+
+; fill c bytes starting at hl with a
+; NOTE: c must not be zero
+fill:
+    ld [hl+], a
+    dec c
+    jr nz, fill
+    ret
+
 
 
 SECTION "Actor data", ROM0
@@ -586,7 +603,7 @@ oam_buffer:
 include "tilesets/testmap.rgbasm"
 include "tilesets/testanise.rgbasm"
 
-SECTION "Stuff??", ROMX
+SECTION "Font", ROMX
 ; FONT
 font:
 ; A
@@ -627,9 +644,15 @@ font:
     dw `00000000
 
 text:
-    db "AB", 0
     db "ABABAAA", 0
 
+SECTION "Text buffer", WRAM0[$C200]
+text_buffer:
+    ; Text is up to 8x16 but may span two columns, so carve out
+    ; enough space for four tiles
+    ds $40
+
+SECTION "Text rendering", ROM0
 PALETTE_TEXT:
     dcolor $000000
     dcolor $ffffff
@@ -706,22 +729,35 @@ show_dialogue:
 
     EnableLCD
 
+    ; Zero out the tile buffer
+    xor a
+    ld hl, text_buffer
+    ld c, $40
+    call fill
+
     ; ----------------------------------------------------------
     ; Setup done!  Real work begins here
     ; b: x-offset within current tile
     ; de: text cursor + current character tiles
-    ; hl: current VRAM tile being drawn into
+    ; hl: current VRAM tile being drawn into + buffer pointer
     ld b, 0
     ld de, text
     ld hl, $8800
-.next_letter:
-    EnableLCD  ; TODO get rid of me with a buffer
-    call wait_for_vblank        ; always wait before drawing
-    DisableLCD  ; TODO get rid of me with a buffer
 
+    ; The basic problem here is to shift a byte and split it
+    ; across two other bytes, like so:
+    ;      yyyyy YYY
+    ;   xxx00000 00000000
+    ;           ↓
+    ;   xxxyyyyy YYY00000
+    ; To do this, we rotate the byte, mask the low bits, OR them
+    ; with the first byte, restore it, mask the high bits, and
+    ; then store that directly as the second byte (which should
+    ; be all zeroes anyway).
+.next_letter:
     ld a, [de]                  ; get current character
     and a                       ; if NUL, we're done!
-    jr z, .done
+    jp z, .done
     inc de                      ; otherwise, increment
 
     ; Get the font character
@@ -743,64 +779,120 @@ show_dialogue:
 .skip_letter_stride:
     ld d, h                     ; move char tile addr to de
     ld e, l
-    pop hl                      ; restore hl (VRAM)
 
     ld a, [de]                  ; read width
     inc de
 
     ; Copy into current tiles
-    ; Part 1: Copy into the right of the current tiles
     push af                     ; stash width
-    ld c, 32
+    ld c, 32                    ; 32 bytes per row
+    ld hl, text_buffer
     inc b   ; FIXME? this makes the loop simpler since i only test after the dec, but it also is the 1px kerning between characters...
 .row_copy:
     ld a, [de]                  ; read next row of character
-    ; Perform shift
+    ; Rotate right by b - 1 pixels
     push bc                     ; preserve b while shifting
+    ld c, $ff                   ; create a mask
     dec b
-.shift:                         ; shift right by b bits
-    jr z, .done_shift
-    ; TODO rra is faster, but rotates
-    srl a
+    jr z, .skip_rotate
+.rotate:
+    rrca
+    srl c
     dec b
-    jr .shift
-.done_shift:
-    pop bc
-    ; Draw to VRAM
+    jr nz, .rotate
+.skip_rotate:
+    push af
+    and a, c                    ; mask right pixels
+    ; Draw to left half of text buffer
     or a, [hl]                  ; OR with current tile
     ld [hl+], a
-    inc de
+    ; Write the remaining bits to right half
+    ld a, c                     ; put mask in a...
+    cpl                         ; ...to invert it
+    ld c, a                     ; then put it back
+    pop af                      ; restore unmasked pixels
+    and a, c                    ; mask left pixels
+    ld [hl+], a                 ; and store them!
+    ; Loop and cleanup
+    inc de                      ; next row of character
+    pop bc                      ; restore counter!
     dec c
     jr nz, .row_copy
     pop af                      ; restore width
 
-    ; Part 2: Copy into the left of a new tile, if necessary
-    ; TODO
+    ; Draw the buffered tiles to vram
+    ; The text buffer is treated like it's 16 pixels wide, but
+    ; VRAM is of course only 8 pixels wide, so we need to do
+    ; this in two iterations: the left two tiles, then the right
+    ; TODO explain this with a fucking diagram because i feel
+    ; like i'm wrong about it anyway
+    pop hl                      ; restore hl (VRAM)
+    push af                     ; stash width, again
+    call wait_for_vblank        ; always wait before drawing
+    push bc
+    push de
+    ; Draw the left two tiles
+    ld c, $20
+    ld de, text_buffer
+.draw_left:
+    ld a, [de]
+    inc de
+    inc de
+    ld [hl+], a
+    dec c
+    jr nz, .draw_left
+    ; Draw the right two tiles
+    ld c, $20
+    ld de, text_buffer + 1
+.draw_right:
+    ld a, [de]
+    inc de
+    inc de
+    ld [hl+], a
+    dec c
+    jr nz, .draw_right
+    pop de
+    pop bc
+    pop af                      ; restore width, again
 
-    ; Cleanup for next iteration
-    ; It's possible we overflowed into the next tile, in which
-    ; case we want to leave hl where it is: pointing at the next
-    ; tile.  Otherwise, we need to back it up to where it was.
-    ; Of course, we also need to increment b, the x offset.
+    ; Increment the pixel offset and deal with overflow
     ; TODO it's possible we're at 9 pixels wide, thanks to the
-    ; kerning pixel
+    ; kerning pixel, uh oh.  but that pixel would be empty,
+    ; right?  wait, no, it comes /before/...  well fuck
     ; TODO actually that might make something weird happen due
     ; to the inc b above, maybe...?
     add a, b                    ; a <- new x offset
-    cp a, 7
-    jr c, .wrap_to_next_tile
-    ld bc, -32                  ; a < 8: back hl up
+    ld bc, -32                  ; move the VRAM pointer back...
+    add hl, bc                  ; ...to the start of the tile
+    cp a, 8
+    jr nc, .wrap_to_next_tile
+    ; The new offset is less than 8, so this character didn't
+    ; draw into the next tile.  Move the VRAM pointer back
+    ; another two tiles, to the column we started in
     add hl, bc
     jr .done_wrap
 .wrap_to_next_tile:
+    ; The new offset is 8 or more, so this character drew into
+    ; the next tile.  Subtract 8, but also shift the text buffer
+    ; by copying all the "right" tiles over the "left" tiles
     sub a, 8                    ; a >= 8: subtract tile width
-    ld b, a
+    push hl
+    push af
+    ld hl, text_buffer + $40 - 1
+    ld c, $20
+.shift_buffer:
+    ld a, [hl-]
+    ld [hl-], a
+    dec c
+    jr nz, .shift_buffer
+    pop af
+    pop hl
 .done_wrap:
     ld b, a                     ; either way, store into b
 
     ; Loop
     pop de                      ; pop text pointer
-    jr .next_letter
+    jp .next_letter
 
 .done:
     EnableLCD  ; TODO get rid of me with a buffer
