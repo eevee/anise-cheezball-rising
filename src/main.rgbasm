@@ -527,47 +527,10 @@ include "tilesets/testmap.rgbasm"
 include "tilesets/testanise.rgbasm"
 
 SECTION "Font", ROMX
-; FONT
-font:
-; A
-    db 6
-    dw `00000000
-    dw `00000000
-    dw `01110000
-    dw `10001000
-    dw `10001000
-    dw `10001000
-    dw `11111000
-    dw `10001000
-    dw `10001000
-    dw `10001000
-    dw `10001000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-; B
-    db 6
-    dw `00000000
-    dw `00000000
-    dw `11110000
-    dw `10001000
-    dw `10001000
-    dw `10001000
-    dw `11110000
-    dw `10001000
-    dw `10001000
-    dw `10001000
-    dw `11110000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-
 text:
-    db "ABABAAA", 0
+    db "Hello, world!", 0
+; FONT
+font: include "font.inc"
 
 SECTION "Text buffer", WRAM0[$C200]
 text_buffer:
@@ -689,7 +652,7 @@ show_dialogue:
     ; character address in hl and /then/ put it in de.  But I
     ; already pushed de, so I can use that as scratch space.
     push hl
-    sub a, 65   ; TODO temporary
+    sub a, 32   ; TODO temporary...?
     ld hl, font
     ld de, 33                   ; 1 width byte + 16 * 2 tiles
     ; TODO can we speed striding up with long mult?
@@ -784,6 +747,7 @@ show_dialogue:
     ; right?  wait, no, it comes /before/...  well fuck
     ; TODO actually that might make something weird happen due
     ; to the inc b above, maybe...?
+    dec b
     add a, b                    ; a <- new x offset
     ld bc, -32                  ; move the VRAM pointer back...
     add hl, bc                  ; ...to the start of the tile
