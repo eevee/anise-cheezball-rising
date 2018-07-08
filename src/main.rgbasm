@@ -136,10 +136,10 @@ start:
     ENDR
 
     ; Define an object
-    ld hl, $8000
-    ld de, ANISE_TEST_TILES
-    ld bc, 24 * 16
-    call copy16
+    ld a, HIGH(ANISE_TEST_TILES)
+    ld [anise_sprites_address], a
+    ld a, LOW(ANISE_TEST_TILES)
+    ld [anise_sprites_address + 1], a
 
     ld a, FACING_DOWN
     ld [anise_facing], a
@@ -208,10 +208,36 @@ main:
     ; Main loop: wait for a vblank, then do stuff
     call wait_for_vblank
 
-    ; Use DMA to update object attribute memory.
-    ; Do this FIRST to ensure that it happens before the screen
-    ; starts to update again.
+    ; GRAPHICS STUFF -- MUST HAPPEN ASAP, AND FAST!
+    ; Only have about a thousand cycles to do everything you
+    ; need with VRAM, and that's assuming music doesn't eat into
+    ; that time!
+
+    ; Use DMA to copy our OAM buffer into real OAM
     call $FF80
+
+    ; Update Anise's current sprite.  Use DMA here because...
+    ; well, geez, it's too slow otherwise.
+    ; TODO that doesn't really bode well in general for me
+    ; TODO there should perhaps just be a list of current tiles
+    ; that need updating, and to what?  hey how does zelda deal
+    ; with animated tiles, I wonder
+    ; TODO ergh, wait, this scheme means that there'll be a
+    ; single frame that you're moving in a direction before the
+    ; sprite actually changes to match.  fuckin hell
+    ld hl, anise_sprites_address
+    ld a, [hl+]
+    ld [rHDMA1], a
+    ld a, [hl]
+    ld [rHDMA2], a
+    ld a, HIGH($0000)
+    ld [rHDMA3], a
+    ld a, LOW($0000)
+    ld [rHDMA4], a
+    ld a, (32 * 3) / 16 - 1
+    ld [rHDMA5], a
+
+    ; END GRAPHICS STUFF
 
     call read_input
 
@@ -356,11 +382,11 @@ ANISE_SPRITE_ANGLED EQU 1
     dec a
     jr .advance_frame
 .done_advancing_frame:
-    ld d, h
-    ld e, l
-    ld hl, $8000
-    ld c, 32 * 3
-    call copy
+    ; Store the new sprite address, to be updated during vblank
+    ld a, h
+    ld [anise_sprites_address], a
+    ld a, l
+    ld [anise_sprites_address + 1], a
 
 .no_movement:
     ; Loop again when done
@@ -490,6 +516,8 @@ anise_frame:
     db
 anise_frame_countdown:
     db
+anise_sprites_address:
+    dw
 
 SECTION "OAM Buffer", WRAM0[$C100]
 oam_buffer:
