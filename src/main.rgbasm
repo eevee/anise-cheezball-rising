@@ -49,13 +49,13 @@ SECTION "P10-P13 signal low edge interrupt", ROM0[$0060]
 
 DisableLCD: MACRO
     ld a, [rLCDC]
-    and a, %01111111
+    and a, $ff & ~LCDCF_ON
     ld [rLCDC], a
 ENDM
 
 EnableLCD: MACRO
     ld a, [rLCDC]
-    or a, %10000000
+    or a, LCDCF_ON
     ld [rLCDC], a
 ENDM
 
@@ -63,7 +63,7 @@ ENDM
 ; only thing we can really do is immediately jump to after the header
 SECTION "init", ROM0[$0100]
     nop
-    jp main
+    jp start
 
 SECTION "whatever", ROM0
 dma_copy:
@@ -80,28 +80,20 @@ dma_copy_end:
 ; Initialization and whatnot
 SECTION "main", ROM0[$0150]
 ; DMA copy routine, not used directly but copied into high RAM at startup
-main:
+start:
     ; Enable interrupts
     ld a, IEF_VBLANK
     ldh [rIE], a
     ; This instruction enables whichever interrupts are enabled according to FFFF
     ei
 
-.wait_for_vblank:
-    halt
-    nop
-    ld a, [vblank_flag]
-    and a
-    jr z, .wait_for_vblank
-    ld a, 0
-    ld [vblank_flag], a
-
     ; Set LCD palette for grayscale mode; yes, it has a palette
     ld a, %01100100
     ld [rBGP], a
 
-    ; LCDC
-    ; TODO document flags etc
+    ; LCD controller
+    ; Note that the LCD itself is off here; it's re-enabled at
+    ; the end of all this loading code
     ld a, LCDCF_OBJ16 | LCDCF_OBJON | LCDCF_BGON
     ldh [rLCDC], a
 
@@ -123,25 +115,16 @@ main:
 
     ; Load some basic tiles
     ld hl, $9000
-    ld bc, TEST_TILES
-    ld d, 100
-.tile_loop:
-    REPT 16
-    ld a, [bc]
-    inc bc
-    ld [hl+], a
-    ENDR
-    dec d
-    jr nz, .tile_loop
+    ld de, TEST_TILES
+    ld bc, 1600
+    call copy16
 
     ; Read from the test map
     ; TODO good candidate for DMA...?  or maybe not since i should really only be filling the visible screen area
     ld hl, $9800
     ld de, TEST_MAP_1
-    REPT 8
-    ld c, 128
-    call copy
-    ENDR
+    ld bc, 1024
+    call copy16
 
     ; Same thing but for an object palette
     ld a, %10000000
@@ -154,16 +137,9 @@ main:
 
     ; Define an object
     ld hl, $8000
-    ld bc, ANISE_TEST_TILES
-    ld d, 24
-.tile_loop2:
-    REPT 16
-    ld a, [bc]
-    inc bc
-    ld [hl+], a
-    ENDR
-    dec d
-    jr nz, .tile_loop2
+    ld de, ANISE_TEST_TILES
+    ld bc, 24 * 16
+    call copy16
 
     ld a, FACING_DOWN
     ld [anise_facing], a
@@ -221,32 +197,20 @@ main:
     ld [hl+], a
 
     ; DMA something
-    ld bc, dma_copy
+    ld de, dma_copy
     ld hl, $FF80
-    REPT dma_copy_end - dma_copy
-    ld a, [bc]
-    inc bc
-    ld [hl+], a
-    ENDR
+    ld c, dma_copy_end - dma_copy
+    call copy
 
     EnableLCD
 
-
-
-vblank_loop:
-    ; Main loop: halt, wait for a vblank, then do stuff
-    halt
-    nop
-    ; TODO is there any reason to do this, versus just checking the register that says whether it was a vblank interrupt?
-    ld hl, vblank_flag
-    ld a, [hl]
-    and a
-    jr z, vblank_loop
-    ld a, $00
-    ld [hl], a
+main:
+    ; Main loop: wait for a vblank, then do stuff
+    call wait_for_vblank
 
     ; Use DMA to update object attribute memory.
-    ; Do this FIRST to ensure that it happens before the screen starts to update again.
+    ; Do this FIRST to ensure that it happens before the screen
+    ; starts to update again.
     call $FF80
 
     call read_input
@@ -385,8 +349,8 @@ ANISE_SPRITE_ANGLED EQU 1
 
     ; Skip ahead 3 sprites * the current frame
     ld bc, 3 * 2 * 16               ; parts * tiles * bytes per tile
+    and a, a
 .advance_frame:    
-    cp a, 0
     jr z, .done_advancing_frame
     add hl, bc
     dec a
@@ -398,15 +362,14 @@ ANISE_SPRITE_ANGLED EQU 1
     ld c, 32 * 3
     call copy
 
-
 .no_movement:
-
     ; Loop again when done
-    jp vblank_loop
+    jp main
 
+; Other blocking actions
 .do_show_dialogue:
     call show_dialogue
-    jp vblank_loop
+    jp main
 
 
 ; populates buttons, buttons_released, buttons_pressed
@@ -452,6 +415,18 @@ read_input:
     ret
 
 SECTION "Utility code", ROM0
+; idle until next vblank
+wait_for_vblank:
+    xor a                       ; clear the vblank flag
+    ld [vblank_flag], a
+.vblank_loop:
+    halt                        ; wait for interrupt
+    ld a, [vblank_flag]         ; was it a vblank interrupt?
+    and a
+    jr z, .vblank_loop          ; if not, keep waiting
+    ret
+
+; TODO these could be sped up somewhat by partial unrolling
 ; copy c bytes from de to hl
 ; NOTE: c must not be zero
 copy:
@@ -460,6 +435,21 @@ copy:
     ld [hl+], a
     dec c
     jr nz, copy
+    ret
+
+; copy bc bytes from de to hl
+; NOTE: bc must not be zero
+copy16:
+    ld a, [de]
+    inc de
+    ld [hl+], a
+    dec bc
+    ; TODO dec bc doesn't set flags??  arrghghh
+    xor a
+    or b
+    jr nz, copy16
+    or c
+    jr nz, copy16
     ret
 
 ; fill c bytes starting at hl with a
@@ -480,101 +470,6 @@ ANISE_ACTOR_INFO:
     ; Walk pose
     db 0, 4
 
-
-SECTION "Sprites", ROM0
-PALETTE_BG0:
-    dcolor $80c870
-    dcolor $48b038
-    dcolor $ddd49b
-    dcolor $aba677
-    dcolor $000000
-    dcolor $000000
-PALETTE_ANISE:
-    dcolor $000000
-    dcolor $204048
-    dcolor $20b0b0
-    dcolor $f8f8f8
-    dcolor $284858
-    dcolor $687080
-    dcolor $888080
-GRASS_SPRITE:
-    dw `00000000
-    dw `00000000
-    dw `01000100
-    dw `01010100
-    dw `00010000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-BRICK_SPRITE:
-    dw `00010000
-    dw `00010000
-    dw `00010000
-    dw `11111111
-    dw `00000001
-    dw `00000001
-    dw `00000001
-    dw `11111111
-EMPTY_SPRITE:
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-ANISE_SPRITE:
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00000000
-    dw `00001333
-    dw `00001323
-    dw `10001233
-    dw `01001333
-    dw `00113332
-    dw `00003002
-    dw `00003002
-SPRITE_ANISE_FRONT_1:
-    dw `00000111
-    dw `00001222
-    dw `00012222
-    dw `00121222
-    dw `00121122
-    dw `00121111
-    dw `00121122
-    dw `00121312
-    dw `00121313
-    dw `00012132
-    dw `00001211
-    dw `00000123
-    dw `00100123
-    dw `00011133
-    dw `00000131
-    dw `00000010
-SPRITE_ANISE_FRONT_2:
-    dw `11100000
-    dw `22210000
-    dw `22221000
-    dw `22212100
-    dw `22112100
-    dw `11112100
-    dw `22112100
-    dw `21312100
-    dw `31312100
-    dw `23121000
-    dw `11210000
-    dw `32100000
-    dw `32100000
-    dw `33100000
-    dw `13100000
-    dw `01000000
 
 SECTION "Important twiddles", WRAM0[$C000]
 vblank_flag:
@@ -899,15 +794,4 @@ show_dialogue:
     ; Remember to reset bank to 0!
     xor a
     ldh [rVBK], a
-    ret
-
-
-wait_for_vblank:
-    xor a                       ; clear the vblank flag
-    ld [vblank_flag], a
-.vblank_loop:
-    halt                        ; wait for interrupt
-    ld a, [vblank_flag]         ; was it a vblank interrupt?
-    and a
-    jr z, .vblank_loop          ; if not, keep waiting
     ret
