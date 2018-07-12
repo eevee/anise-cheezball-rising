@@ -1,15 +1,6 @@
 include "inc/hardware.inc"
 
 ; Constants
-BUTTON_RIGHT  EQU 0
-BUTTON_LEFT   EQU 1
-BUTTON_UP     EQU 2
-BUTTON_DOWN   EQU 3
-BUTTON_A      EQU 4
-BUTTON_B      EQU 5
-BUTTON_START  EQU 6
-BUTTON_SELECT EQU 7
-
 FACING_DOWN   EQU 0
 FACING_UP     EQU 1
 FACING_RIGHT  EQU 2
@@ -242,7 +233,7 @@ main:
     call read_input
 
     ld a, [buttons_pressed]
-    bit BUTTON_A, a
+    bit PADB_A, a
     jp nz, .do_show_dialogue
 
     ; OK, uh, so, what do i need here
@@ -271,7 +262,7 @@ ANISE_SPRITE_ANGLED EQU 1
     ld bc, 4
     ; d: is there any movement at all?
     ld d, 0
-    bit BUTTON_LEFT, a
+    bit PADB_LEFT, a
     jr z, .skip_left
     ld d, 1
     ld hl, oam_buffer + 1
@@ -281,7 +272,7 @@ ANISE_SPRITE_ANGLED EQU 1
     add hl, bc
     dec [hl]
 .skip_left:
-    bit BUTTON_RIGHT, a
+    bit PADB_RIGHT, a
     jr z, .skip_right
     ld d, 1
     ld hl, oam_buffer + 1
@@ -291,7 +282,7 @@ ANISE_SPRITE_ANGLED EQU 1
     add hl, bc
     inc [hl]
 .skip_right:
-    bit BUTTON_UP, a
+    bit PADB_UP, a
     jr z, .skip_up
     ld d, 1
     ld hl, oam_buffer
@@ -301,7 +292,7 @@ ANISE_SPRITE_ANGLED EQU 1
     add hl, bc
     dec [hl]
 .skip_up:
-    bit BUTTON_DOWN, a
+    bit PADB_DOWN, a
     jr z, .skip_down
     ld d, 1
     ld hl, oam_buffer
@@ -316,22 +307,22 @@ ANISE_SPRITE_ANGLED EQU 1
     ; TODO hey i could just keep shifting and...  wait is there any point to that, maybe it's faster?
     ld hl, anise_facing
     ld a, [buttons_pressed]
-    bit BUTTON_LEFT, a
+    bit PADB_LEFT, a
     jr z, .skip_left2
     ld [hl], FACING_LEFT
     jr .skip_down2
 .skip_left2:
-    bit BUTTON_RIGHT, a
+    bit PADB_RIGHT, a
     jr z, .skip_right2
     ld [hl], FACING_RIGHT
     jr .skip_down2
 .skip_right2:
-    bit BUTTON_UP, a
+    bit PADB_UP, a
     jr z, .skip_up2
     ld [hl], FACING_UP
     jr .skip_down2
 .skip_up2:
-    bit BUTTON_DOWN, a
+    bit PADB_DOWN, a
     jr z, .skip_down2
     ld [hl], FACING_DOWN
 .skip_down2:
@@ -423,8 +414,9 @@ read_input:
     ld a, [rP1]
     cpl
     and a, $0f
-    swap a                      ; put face buttons in high nybble
-    or a, b                     ; combine with dpad buttons
+    swap b                      ; put dpad in the high nybble
+                                ; (matches GBA bit order)
+    or a, b                     ; combine with dpad
 
     ; a now contains the current buttons
     ld hl, buttons
