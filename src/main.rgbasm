@@ -132,6 +132,9 @@ start:
     ld a, LOW(ANISE_TEST_TILES)
     ld [anise_sprites_address + 1], a
 
+    ld a, 64
+    ld [anise_x], a
+    ld [anise_y], a
     ld a, FACING_DOWN
     ld [anise_facing], a
     ld a, ANIMATION_LENGTH
@@ -258,50 +261,66 @@ ANISE_SPRITE_ANGLED EQU 1
 
     ; Anise update loop
     ld a, [buttons]
-    ; set b/c to the y/x coordinates
-    ld bc, 4
-    ; d: is there any movement at all?
-    ld d, 0
+    ; b/c: dx/dy
+    ld b, 0
+    ld c, 0
     bit PADB_LEFT, a
     jr z, .skip_left
-    ld d, 1
-    ld hl, oam_buffer + 1
-    dec [hl]
-    add hl, bc
-    dec [hl]
-    add hl, bc
-    dec [hl]
+    dec b
 .skip_left:
     bit PADB_RIGHT, a
     jr z, .skip_right
-    ld d, 1
-    ld hl, oam_buffer + 1
-    inc [hl]
-    add hl, bc
-    inc [hl]
-    add hl, bc
-    inc [hl]
+    inc b
 .skip_right:
     bit PADB_UP, a
     jr z, .skip_up
-    ld d, 1
-    ld hl, oam_buffer
-    dec [hl]
-    add hl, bc
-    dec [hl]
-    add hl, bc
-    dec [hl]
+    dec c
 .skip_up:
     bit PADB_DOWN, a
     jr z, .skip_down
-    ld d, 1
-    ld hl, oam_buffer
-    inc [hl]
-    add hl, bc
-    inc [hl]
-    add hl, bc
-    inc [hl]
+    inc c
 .skip_down:
+
+    ; Update sprite positions, hackily
+    ; x
+    ld de, 4
+    ld hl, oam_buffer + 1
+    ld a, [anise_x]
+    add a, b
+    ld [anise_x], a
+    ld a, [hl]
+    add a, b
+    ld [hl], a
+    add hl, de
+    ld a, [hl]
+    add a, b
+    ld [hl], a
+    add hl, de
+    ld a, [hl]
+    add a, b
+    ld [hl], a
+    ; y
+    ld de, 4
+    ld hl, oam_buffer
+    ld a, [anise_y]
+    add a, c
+    ld [anise_x], a
+    ld a, [hl]
+    add a, c
+    ld [hl], a
+    add hl, de
+    ld a, [hl]
+    add a, c
+    ld [hl], a
+    add hl, de
+    ld a, [hl]
+    add a, c
+    ld [hl], a
+
+    ; Set d to dx|dy, which is nonzero iff we moved
+    ld a, b
+    or a, c
+    ld d, a
 
     ; Figure out which way we're facing, based on which (if any) button is newly-pressed this frame
     ; TODO hey i could just keep shifting and...  wait is there any point to that, maybe it's faster?
@@ -497,6 +516,10 @@ buttons:
 buttons_pressed:
     db
 buttons_released:
+    db
+anise_x:
+    db
+anise_y:
     db
 anise_facing:
     db
