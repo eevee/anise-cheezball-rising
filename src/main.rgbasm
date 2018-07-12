@@ -543,7 +543,8 @@ include "tilesets/testanise.rgbasm"
 
 SECTION "Font", ROMX
 text:
-    db "Hello, world!", 0
+    db "The quick brown fox jumps over the     lazy dog's back.  AOOWWRRR!!!!", 0
+    db "Jackdaws love my big sphinx of quartz.", 0
 ; FONT
 font: include "font.inc"
 
@@ -552,6 +553,11 @@ text_buffer:
     ; Text is up to 8x16 but may span two columns, so carve out
     ; enough space for four tiles
     ds $40
+text_x:
+    ; x offset within the current tile at which to render
+    db
+text_y:
+    db
 
 SECTION "Text rendering", ROM0
 PALETTE_TEXT:
@@ -560,13 +566,23 @@ PALETTE_TEXT:
     dcolor $999999
     dcolor $666666
 
+SCREEN_WIDTH_TILES EQU 20
+CANVAS_WIDTH_TILES EQU 32
+SCREEN_HEIGHT_TILES EQU 18
+CANVAS_HEIGHT_TILES EQU 32
+BYTES_PER_TILE EQU 16
+TEXT_START_TILE_1 EQU 128
+TEXT_START_TILE_2 EQU TEXT_START_TILE_1 + SCREEN_WIDTH_TILES * 2
+
 show_dialogue:
-    ; TODO blank out the second half of bank 1 before all this, maybe on the fly to average out the cpu time
+    ; SETUP
+    ; Slide up the dialogue window (by showing one row of black
+    ; at a time, starting at the bottom)
 
-    ; TODO get rid of this with a slide-up effect
-    DisableLCD
+    ; Use four vblanks
+    call wait_for_vblank
 
-    ; Set up palette
+    ; Set up palette during this first vblank, too
     ld a, %10111000
     ld [rBCPS], a
     ld hl, PALETTE_TEXT
@@ -575,60 +591,36 @@ show_dialogue:
     ld [rBCPD], a
     ENDR
 
-    ; Fill text rows with tiles (blank border, custom tiles)
-    ld hl, $9800 + 32 * 14
-    ; Top row, all tile 255
-    ld a, 255
-    ld c, 32
-.loop1:
-    ld [hl+], a
-    dec c
-    jr nz, .loop1
-    ; Text row 1: 255 on the edges, then middle goes 128, 130, ...
-    ld a, 255
-    ld [hl+], a
-    ld a, 128
-    ld c, 30
-.loop2:
-    ld [hl+], a
-    add a, 2
-    dec c
-    jr nz, .loop2
-    ld a, 255
-    ld [hl+], a
-    ; Text row 2: same as above, but middle is 129, 131, ...
-    ld a, 255
-    ld [hl+], a
-    ld a, 129
-    ld c, 30
-.loop3:
-    ld [hl+], a
-    add a, 2
-    dec c
-    jr nz, .loop3
-    ld a, 255
-    ld [hl+], a
-    ; Bottom row, all tile 255
-    ld a, 255
-    ld c, 32
-.loop4:
-    ld [hl+], a
-    dec c
-    jr nz, .loop4
-
-    ; Repeat all of the above, but in bank 1, which specifies the character bank and palette.  Luckily, that's the same for everyone.
+    ; Blank out tile 255
     ld a, 1
     ldh [rVBK], a
-    ld a, %00001111  ; bank 1, palette 7
-    ld hl, $9800 + 32 * 14
-    ; Top row, all tile 255
-    ld c, 32 * 4  ; 4 rows
-.loop5:
-    ld [hl+], a
-    dec c
-    jr nz, .loop5
+    xor a
+    ld c, BYTES_PER_TILE
+    ld hl, $8800 + 255 * BYTES_PER_TILE
+    call fill
 
-    EnableLCD
+    ; Row 4
+    ld hl, $9800 + CANVAS_WIDTH_TILES * (SCREEN_HEIGHT_TILES - 1)
+    ld b, TEXT_START_TILE_2 + 1
+    call fill_tilemap_row
+
+    ; Row 3
+    call wait_for_vblank
+    ld hl, $9800 + CANVAS_WIDTH_TILES * (SCREEN_HEIGHT_TILES - 2)
+    ld b, TEXT_START_TILE_2
+    call fill_tilemap_row
+
+    ; Row 2
+    call wait_for_vblank
+    ld hl, $9800 + CANVAS_WIDTH_TILES * (SCREEN_HEIGHT_TILES - 3)
+    ld b, TEXT_START_TILE_1 + 1
+    call fill_tilemap_row
+
+    ; Row 1
+    call wait_for_vblank
+    ld hl, $9800 + CANVAS_WIDTH_TILES * (SCREEN_HEIGHT_TILES - 4)
+    ld b, TEXT_START_TILE_1
+    call fill_tilemap_row
 
     ; Zero out the tile buffer
     xor a
@@ -638,10 +630,11 @@ show_dialogue:
 
     ; ----------------------------------------------------------
     ; Setup done!  Real work begins here
-    ; b: x-offset within current tile
     ; de: text cursor + current character tiles
     ; hl: current VRAM tile being drawn into + buffer pointer
-    ld b, 0
+    ld a, 4
+    ld [text_y], a
+    ld b, 4
     ld de, text
     ld hl, $8800
 
@@ -688,6 +681,20 @@ show_dialogue:
     push af                     ; stash width
     ld c, 32                    ; 32 bytes per row
     ld hl, text_buffer
+; FIXME: doesn't work, we write beyond the end of the text
+; buffer
+;    ; Skip ahead y rows
+;    ld a, [text_y]
+;    or a
+;    jr z, .skip_adjust_y
+;    push bc
+;    ld bc, 4
+;.adjust_y:
+;    add hl, bc
+;    dec a
+;    jr nz, .adjust_y
+;    pop bc
+;.skip_adjust_y:
     inc b   ; FIXME? this makes the loop simpler since i only test after the dec, but it also is the 1px kerning between characters...
 .row_copy:
     ld a, [de]                  ; read next row of character
@@ -801,4 +808,37 @@ show_dialogue:
     ; Remember to reset bank to 0!
     xor a
     ldh [rVBK], a
+    ret
+
+
+; Fill a row in the tilemap in a way that's helpful to dialogue.
+; TODO document better.
+; TODO this should, you know, probably use the window or be
+; configurable or sssomething
+; hl: where to start filling
+; b: tile to start with
+fill_tilemap_row:
+    ; Populate bank 0, the tile proper
+    xor a
+    ldh [rVBK], a
+
+    ld c, SCREEN_WIDTH_TILES
+    ld a, b
+.loop0:
+    ld [hl+], a
+    add a, 2
+    dec c
+    jr nz, .loop0
+
+    ; Populate bank 1, the bank and palette
+    ld a, 1
+    ldh [rVBK], a
+    ld a, %00001111  ; bank 1, palette 7
+    ld c, SCREEN_WIDTH_TILES
+    dec hl
+.loop1:
+    ld [hl-], a
+    dec c
+    jr nz, .loop1
+
     ret
