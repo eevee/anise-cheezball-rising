@@ -16,6 +16,26 @@ _b = ((\1) & $0000ff) >> 0  >> 3
     ENDM
 
 
+; Reset vectors
+SECTION "rst $00", ROM0[$0000]
+    ret
+SECTION "rst $08", ROM0[$0008]
+    ret
+SECTION "rst $10", ROM0[$0010]
+    ret
+SECTION "rst $18", ROM0[$0018]
+    ret
+SECTION "rst $20", ROM0[$0020]
+    ret
+SECTION "rst $28", ROM0[$0028]
+    ret
+SECTION "rst $30", ROM0[$0030]
+    ret
+SECTION "rst $38", ROM0[$0038]
+    ; NOTE: This is encoded as $ff, so it's a great place to put
+    ; a crash handler
+    ret
+
 ; Interrupt addresses
 SECTION "Vblank interrupt", ROM0[$0040]
     push hl
@@ -83,8 +103,9 @@ start:
     ld [rBGP], a
 
     ; LCD controller
-    ; Note that the LCD itself is off here; it's re-enabled at
+    ; Note that the LCD is turned off here; it's re-enabled at
     ; the end of all this loading code
+    call wait_for_vblank
     ld a, LCDCF_OBJ16 | LCDCF_OBJON | LCDCF_BGON
     ldh [rLCDC], a
 
@@ -465,7 +486,7 @@ wait_for_vblank:
 
 ; TODO these could be sped up somewhat by partial unrolling
 ; copy c bytes from de to hl
-; NOTE: c must not be zero
+; NOTE: c = 0 means to copy 256 bytes!
 copy:
     ld a, [de]
     inc de
