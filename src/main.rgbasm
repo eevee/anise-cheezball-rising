@@ -478,12 +478,14 @@ wait_for_vblank:
     xor a                       ; clear the vblank flag
     di                          ; avoid irq race after this ld
     ld [vblank_flag], a
-    ei
 .vblank_loop:
+    ei
     halt                        ; wait for interrupt
+    di
     ld a, [vblank_flag]         ; was it a vblank interrupt?
     and a
     jr z, .vblank_loop          ; if not, keep waiting
+    ei
     ret
 
 ; TODO these could be sped up somewhat by partial unrolling
