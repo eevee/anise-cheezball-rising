@@ -476,7 +476,9 @@ SECTION "Utility code", ROM0
 ; idle until next vblank
 wait_for_vblank:
     xor a                       ; clear the vblank flag
+    di                          ; avoid irq race after this ld
     ld [vblank_flag], a
+    ei
 .vblank_loop:
     halt                        ; wait for interrupt
     ld a, [vblank_flag]         ; was it a vblank interrupt?
