@@ -367,8 +367,8 @@ ANISE_SPRITE_ANGLED EQU 1
     ld [hl], FACING_DOWN
 .skip_down2:
 
-    ld a, d
-    cp a, 0
+    xor a
+    or d
     jp z, .no_movement
 
     ld a, [anise_frame_countdown]
@@ -378,7 +378,7 @@ ANISE_SPRITE_ANGLED EQU 1
     ; TODO i jump when it hits zero, so will this skip a frame, or no because this is one of the frames
     ld a, ANIMATION_LENGTH
     ld [anise_frame_countdown], a
-    
+
     ; Anise has a unique sprite, so overwrite the current tile rather than
     ; changing tiles
     ld hl, ANISE_TEST_TILES
@@ -386,15 +386,14 @@ ANISE_SPRITE_ANGLED EQU 1
     ; Skip ahead a number of /rows/ of tiles, corresponding to anise's facing
     ld a, [anise_facing]
     and a, %11                      ; cap to 4, just in case
+    jr z, .skip_stride_facing       ; handle zero case
     ; TODO unhardcode frame count (oof)
     ld bc, 4 * 3 * 2 * 16           ; frames * parts * tiles * bytes per tile
-.skip_facing_row:
-    cp a, 0
-    jr z, .done_skip_facing_row
+.stride_facing:
     add hl, bc
     dec a
-    jr .skip_facing_row
-.done_skip_facing_row:
+    jr nz, .stride_facing
+.skip_stride_facing:
 
     ; Note that this part always needs to happen!!  I'm just doing it here to
     ; avoid loading anise_frame again in the next bit
@@ -406,13 +405,13 @@ ANISE_SPRITE_ANGLED EQU 1
 
     ; Skip ahead 3 sprites * the current frame
     ld bc, 3 * 2 * 16               ; parts * tiles * bytes per tile
-    and a, a
-.advance_frame:    
-    jr z, .done_advancing_frame
+    or a
+    jr z, .skip_stride_frame
+.stride_frame:
     add hl, bc
     dec a
-    jr .advance_frame
-.done_advancing_frame:
+    jr nz, .stride_frame
+.skip_stride_frame:
     ; Store the new sprite address, to be updated during vblank
     ld a, h
     ld [anise_sprites_address], a
@@ -506,11 +505,9 @@ copy16:
     inc de
     ld [hl+], a
     dec bc
-    ; TODO dec bc doesn't set flags??  arrghghh
-    xor a
-    or b
-    jr nz, copy16
-    or c
+    ; dec bc doesn't set flags, so gotta check by hand
+    ld a, b
+    or a, c
     jr nz, copy16
     ret
 
@@ -687,14 +684,14 @@ show_dialogue:
     push hl
     sub a, 32   ; TODO temporary...?
     ld hl, font
+    and a
+    jr z, .skip_letter_stride
     ld de, 33                   ; 1 width byte + 16 * 2 tiles
     ; TODO can we speed striding up with long mult?
-    and a
 .letter_stride:
-    jr z, .skip_letter_stride
     add hl, de
     dec a
-    jr .letter_stride
+    jr nz, .letter_stride
 .skip_letter_stride:
     ld d, h                     ; move char tile addr to de
     ld e, l
