@@ -163,53 +163,86 @@ start:
 
     ; Put an object on the screen, maybe.  Probably not.
 
+    ld hl, $8000 + 6 * 16
+    ld de, ANISE_COLLISION_DEBUG
+    ld c, 16
+    call copy
+
     ; ANTENNA
-    ld b, 64
-    ld c, 64
-    ld hl, oam_buffer
-    ; y-coord
-    ld a, c
-    sub a, 6
-    ld [hl+], a
+    ld hl, anise_x              ; b/c = x/y
+    ld b, [hl]
+    inc hl
+    ld c, [hl]
+    ld hl, ANISE_SPRITE_POSITIONS
     ; x-coord
-    ld a, b
-    add a, 6
-    ld [hl+], a
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    ld [oam_buffer + 1], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 0], a
     ; chr index
-    ld a, 0
-    ld [hl+], a
+    xor a
+    ld [oam_buffer + 2], a
     ; attributes
-    ld a, %00000000
-    ld [hl+], a
+    ld [oam_buffer + 3], a
 
     ; LEFT PART
-    ; y-coord
-    ld a, c
-    ld [hl+], a
     ; x-coord
-    ld a, b
-    ld [hl+], a
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    ld [oam_buffer + 5], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 4], a
     ; chr index
     ld a, 2
-    ld [hl+], a
+    ld [oam_buffer + 6], a
     ; attributes
     ld a, %00000001
-    ld [hl+], a
+    ld [oam_buffer + 7], a
 
     ; RIGHT PART
-    ; y-coord
-    ld a, c
-    ld [hl+], a
     ; x-coord
-    ld a, b
+    ld a, [hl+]
+    add a, b
     add a, 8
-    ld [hl+], a
+    ld [oam_buffer + 9], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 8], a
     ; chr index
     ld a, 4
-    ld [hl+], a
+    ld [oam_buffer + 10], a
     ; attributes
     ld a, %00000001
-    ld [hl+], a
+    ld [oam_buffer + 11], a
+
+    ; DEBUG BIT
+    ; x-coord
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    ld [oam_buffer + 13], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 12], a
+    ; chr index
+    ld a, 6
+    ld [oam_buffer + 14], a
+    ; attributes
+    ld a, %00000001
+    ld [oam_buffer + 15], a
 
     ; DMA something
     ld de, dma_copy
@@ -253,6 +286,14 @@ main:
     ld [rHDMA5], a
 
     ; END GRAPHICS STUFF
+
+    ; Busy-loop until the END of vblank, to make this show up in
+    ; bgb's cpu monitor better
+    ld hl, rLY
+.wait_for_no_vblank:
+    ld a, [hl]
+    or a
+    jr nz, .wait_for_no_vblank
 
     call read_input
 
@@ -302,49 +343,285 @@ ANISE_SPRITE_ANGLED EQU 1
     inc c
 .skip_down:
 
-    ; Update sprite positions, hackily
-    ; x
-    ld de, 4
-    ld hl, oam_buffer + 1
+    ; Collision detection!  General approach is as follows:
+    ; 1. Check axes separately, x first.
+    ; 2. Check continuously.
+    ; 3. Ignore anything we're already overlapping.
+    ; FIXME this does not handle going OFF the map correctly,
+    ; but oh well for now
+
+; Given a point on the top or left of a box, convert it to the
+; containing grid cell.
+ToInclusiveCell: MACRO
+    ; This is just floor division
+    srl a
+    srl a
+    srl a
+ENDM
+; Given a point on the bottom or right of a box, convert it to
+; the containing grid cell.
+ToExclusiveCell: MACRO
+    ; Deal with the exclusive edge by subtracting the planck
+    ; length, then flooring
+    dec a
+    srl a
+    srl a
+    srl a
+ENDM
+
+    ; x axis
+    ; Compute the NEAREST and FURTHEST grid columns to consider.
+    ; The NEAREST is the first one in the direction of movement
+    ; that we are NOT currently overlapping, i.e. the column
+    ; after the one containing our leading edge.  The FURTHEST
+    ; is the column that /will/ contain our leading edge, if the
+    ; movement is successful.
+    ld a, b
+    cp a, $80
+    jp nc, .negative_x
+    ; FIXME: risk of over/underflow near edges with the +1/-1
+.positive_x:
+    ld hl, ANISE_RADIUS
+    ; Put the NEAREST column in d: Exc(x + r) + 1
+    ; moving RIGHT: Exc(x + r) + 1 => Exc(x + r + dx)
+    ; moving LEFT: Inc(x - r + dx) <= Inc(x - r) - 1
+    ld a, [anise_x]             ; a = x
+    add a, [hl]                 ; a = x + r
+    ld e, a                     ; e = x + r
+    ToExclusiveCell
+    inc a                       ; a = Exc(x + r) + 1
+    ld d, a                     ; d = Exc(x + r) + 1
+    ; Put the FURTHEST column in e: Exc(x + r + dx)
+    ld a, e                     ; a = x + r
+    add a, b                    ; a = x + r + dx
+    ToExclusiveCell
+    ld e, a                     ; e = Inc(x + r + dx)
+    ; Loop over columns in [d, e].  (If d > e, this movement
+    ; doesn't cross a grid line; stop here.)
+    ld a, e
+    cp d
+    jp c, .done_x
+    ; Don't need dx/dy atm, so stash bc for some scratch space
+    push bc
+.x_row_scan:
+    ; For each column we might cross: check whether any of the
+    ; rows we currently overlap will block us
+    ; TODO these are the same every iteration, no need to
+    ; recompute; does b even change?
+    ; TODO document what registers are at various stages here
+    ld a, [anise_y]
+    ld hl, ANISE_RADIUS
+    sub a, [hl]
+    ToInclusiveCell
+    ld b, a                     ; b = minimum y
+    ld a, [anise_y]
+    add a, [hl]
+    ToExclusiveCell
+    ld c, a                     ; c = maximum/current y
+
+.x_column_scan:
+    ; Fetch flags for the cell at 
+    push bc
+    ld b, d
+    call get_cell_flags
+    pop bc
+    ; Check yon flag
+    and a, $01
+    jr z, .not_blocked
+    ; If the flag is set, we're blocked!  This is as far as we
+    ; go.  Set x to match this cell (d) minus our radius
+    ; TODO we should finish up the column scan at least
+    ld a, d
+    sla a
+    sla a
+    sla a
+    sub a, [hl]
+    ld [anise_x], a
+    ; TODO this pop is mad confusing
+    pop bc
+    ; TODO need this because there's still an "update" below
+    ld b, 0
+    jp .done_x
+.not_blocked:
+    ; Not blocked, so keep looking
+    dec c
+    ld a, c
+    cp b
+    jr nc, .x_column_scan
+
+    ; Finished checking one column successfully, so continue on
+    ; to the next one
+    inc d
+    ld a, e
+    cp d
+    jr nc, .x_row_scan
+
+    ; Done, and we never hit anything!  Update our position to
+    ; what was requested
+    pop bc
     ld a, [anise_x]
     add a, b
     ld [anise_x], a
-    ld a, [hl]
-    add a, b
-    ld [hl], a
-    add hl, de
-    ld a, [hl]
-    add a, b
-    ld [hl], a
-    add hl, de
-    ld a, [hl]
-    add a, b
-    ld [hl], a
-    ; y
-    ld de, 4
-    ld hl, oam_buffer
+    ; TODO need this because there's still an "update" below
+    ld b, 0
+
+    jp .done_x
+
+.negative_x:
+    ; TODO i would REALLY LOVE if this weren't all totally
+    ; duplicated.
+    ld hl, ANISE_RADIUS
+    ; Put the NEAREST column in d: Inc(x - r) - 1
+    ld a, [anise_x]             ; a = x
+    sub a, [hl]                 ; a = x - r
+    ld e, a                     ; e = x - r
+    ToInclusiveCell
+    dec a                       ; a = Inc(x - r) - 1
+    ld d, a                     ; d = Inc(x - r) - 1
+    ; Put the FURTHEST column in e: Inc(x - r + dx)
+    ld a, e                     ; a = x - r
+    add a, b                    ; a = x - r + dx
+    ToInclusiveCell
+    ld e, a                     ; e = Inc(x - r + dx)
+    ; Loop over columns in [d, e].  (If e > d, this movement
+    ; doesn't cross a grid line; stop here.)
+    ld a, d
+    cp e
+    jp c, .done_x
+    ; Don't need dx/dy atm, so stash bc for some scratch space
+    push bc
+.x_row_scan2:
+    ; For each column we might cross: check whether any of the
+    ; rows we currently overlap will block us
+    ; TODO these are the same every iteration, no need to
+    ; recompute; does b even change?
+    ; TODO document what registers are at various stages here
     ld a, [anise_y]
-    add a, c
+    ld hl, ANISE_RADIUS
+    sub a, [hl]
+    ToInclusiveCell
+    ld b, a                     ; b = minimum y
+    ld a, [anise_y]
+    add a, [hl]
+    ToExclusiveCell
+    ld c, a                     ; c = maximum/current y
+
+.x_column_scan2:
+    ; Fetch flags for the cell at 
+    push bc
+    ld b, d
+    call get_cell_flags
+    pop bc
+    ; Check yon flag
+    and a, $01
+    jr z, .not_blocked2
+    ; If the flag is set, we're blocked!  This is as far as we
+    ; go.  Set x to match this cell (d), plus its width, plus
+    ; our radius
+    ; TODO we should finish up the column scan at least
+    ld a, d
+    inc a
+    sla a
+    sla a
+    sla a
+    add a, [hl]
     ld [anise_x], a
-    ld a, [hl]
-    add a, c
-    ld [hl], a
-    add hl, de
-    ld a, [hl]
-    add a, c
-    ld [hl], a
-    add hl, de
-    ld a, [hl]
-    add a, c
-    ld [hl], a
+    ; TODO this pop is mad confusing
+    pop bc
+    ; TODO need this because there's still an "update" below
+    ld b, 0
+    jp .done_x
+.not_blocked2:
+    ; Not blocked, so keep looking
+    dec c
+    ld a, c
+    cp b
+    jr nc, .x_column_scan2
+
+    ; Finished checking one column successfully, so continue on
+    ; to the next one
+    dec d
+    ld a, d
+    cp e
+    jr nc, .x_row_scan2
+
+    ; Done, and we never hit anything!  Update our position to
+    ; what was requested
+    pop bc
+    ld a, [anise_x]
+    add a, b
+    ld [anise_x], a
+    ; TODO need this because there's still an "update" below
+    ld b, 0
+
+.done_x:
 
     ; Set d to dx|dy, which is nonzero iff we moved
     ld a, b
     or a, c
     ld d, a
 
+    ; Update canonical position
+    ld a, [anise_x]
+    add a, b
+    ld b, a
+    ld [anise_x], a
+    ld a, [anise_y]
+    add a, c
+    ld c, a
+    ld [anise_y], a
+
+    ; Update sprite positions, hackily
+    ; Here, b/c are already x/y
+    ; ANTENNA
+    ld hl, ANISE_SPRITE_POSITIONS
+    ; x-coord
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    ld [oam_buffer + 1], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 0], a
+    ; LEFT PART
+    ; x-coord
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    ld [oam_buffer + 5], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 4], a
+    ; RIGHT PART
+    ; x-coord
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    ld [oam_buffer + 9], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 8], a
+    ; DEBUG
+    ; x-coord
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    ld [oam_buffer + 13], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 12], a
+
     ; Figure out which way we're facing, based on which (if any) button is newly-pressed this frame
     ; TODO hey i could just keep shifting and...  wait is there any point to that, maybe it's faster?
+    ; TODO whoops, this doesn't work if you let go of the button.
     ld hl, anise_facing
     ld a, [buttons_pressed]
     bit PADB_LEFT, a
@@ -427,6 +704,52 @@ ANISE_SPRITE_ANGLED EQU 1
     call show_dialogue
     jp main
 
+
+; Fetches properties for the map cell at the given coordinates.
+; In: bc = x/y coordinates
+; Out: a = flags
+get_cell_flags:
+    push hl
+    push de
+    ; Get the cell first
+    ld hl, TEST_MAP_1
+    ; Add x coordinate
+    ld d, 0
+    ld e, b
+    add hl, de
+    ; Add y coordinate, with stride of 32, which we can do
+    ; without multiplying by shifting left 5
+    ld d, c
+    srl d
+    srl d
+    srl d
+    ld a, c
+    swap a
+    sla a
+    and a, $e0
+    ld e, a
+    add hl, de
+    ; Get the cell itself
+    ld a, [hl]
+    ; I don't have real flags at the moment, so, fake it
+    cp a, 2
+    jr z, .blocking
+    cp a, 3
+    jr z, .blocking
+    cp a, 12
+    jr z, .blocking
+    cp a, 13
+    jr z, .blocking
+    jr .not_blocking
+.blocking:
+    ld a, 1
+    jr .done
+.not_blocking:
+    xor a
+.done:
+    pop de
+    pop hl
+    ret
 
 ; populates buttons, buttons_released, buttons_pressed
 ; NOTE: trashes a, b, hl
@@ -528,6 +851,22 @@ ANISE_ACTOR_INFO:
     db 0, 1
     ; Walk pose
     db 0, 4
+ANISE_RADIUS:
+    db 3
+ANISE_SPRITE_POSITIONS:
+    db -2, -20
+    db -8, -14
+    db 0, -14
+    db -3, -3
+ANISE_COLLISION_DEBUG:
+    dw `22222200
+    dw `22222200
+    dw `22222200
+    dw `22222200
+    dw `22222200
+    dw `22222200
+    dw `00000000
+    dw `00000000
 
 
 SECTION "Important twiddles", WRAM0[$C000]
