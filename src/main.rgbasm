@@ -385,124 +385,184 @@ ANISE_SPRITE_ANGLED EQU 1
     ; FIXME this does not handle going OFF the map correctly,
     ; but oh well for now
 
-; Given a point on the top or left of a box, convert it to the
-; containing grid cell.
-ToInclusiveCell: MACRO
-    ; This is just floor division
-    srl a
-    srl a
-    srl a
-ENDM
-; Given a point on the bottom or right of a box, convert it to
-; the containing grid cell.
-ToExclusiveCell: MACRO
-    ; Deal with the exclusive edge by subtracting the planck
-    ; length, then flooring
-    dec a
-    srl a
-    srl a
-    srl a
+; Add an 8-bit register to a 16-bit register, in place.
+; No clever tricks, just the six ops you'd expect.
+; ex: Add8To16 bc, d
+Add8To16: MACRO
+    ld a, LOW(\1)
+    add a, \2
+    ld LOW(\1), a
+    ld a, HIGH(\1)
+    adc a, 0
+    ld HIGH(\1), a
 ENDM
 
-    ; x axis
-    ; Compute the NEAREST and FURTHEST grid columns to consider.
-    ; The NEAREST is the first one in the direction of movement
-    ; that we are NOT currently overlapping, i.e. the column
-    ; after the one containing our leading edge.  The FURTHEST
-    ; is the column that /will/ contain our leading edge, if the
-    ; movement is successful.
-    ; bc: current x position
-    ld hl, anise_x
-    ld a, [hl+]
-    ld b, a
-    ld c, [hl]
-    ld a, b
-    ; a: current x velocity (= movement)
-    ld hl, anise_vx
-    ld a, [hl]
-    cp a, $80
-    jp nc, .negative_x
-    or a
-    jp z, .done_x
-    ; FIXME: risk of over/underflow near edges with the +1/-1
-.positive_x:
-; NEG: all of this is different really
+; Subtract an 8-bit register from a 16-bit register, in place.
+; No clever tricks, just the six ops you'd expect.
+; ex: Sub8To16 bc, d
+Sub8From16: MACRO
+    ld a, LOW(\1)
+    sub a, \2
+    ld LOW(\1), a
+    ld a, HIGH(\1)
+    sbc a, 0
+    ld HIGH(\1), a
+ENDM
+
+; TODO put this in its own file; make notes about what
+; "inclusive" and "exclusive" mean
+
+; Expands to collision detection code in one of the four
+; directions; the code is similar, but not similar enough to
+; handle at runtime, alas.
+; \1 = axis (0 = x, 1 = y)
+; \2 = sign (0 = up/left/negative, 1 = down/right/positive)
+; \3 = label to jump to when done with this axis
+CheckCollision: MACRO
+_is_x = (\1 == 0)
+_is_y = (\1 == 1)
+_is_neg = (\2 == 0)
+_is_pos = (\2 == 1)
+IF _is_x
+_p_pos EQUS "anise_x"
+_q_pos EQUS "anise_y"
+_p_vel EQUS "anise_vx"
+_q_vel EQUS "anise_vy"
+ELSE
+_p_pos EQUS "anise_y"
+_q_pos EQUS "anise_x"
+_p_vel EQUS "anise_vy"
+_q_vel EQUS "anise_vx"
+ENDC
+
     ld hl, ANISE_RADIUS
-    ; Put the NEAREST column in d: Exc(x + r) + 1
-    ; moving RIGHT: Exc(x + r) + 1 => Exc(x + r + dx)
-    ; moving LEFT: Inc(x - r + dx) <= Inc(x - r) - 1
-    ; bc: x
-    ld a, [hl]
-    add a, c
-    ld c, a
-    ld a, b
-    adc a, 0
-    ld b, a                     ; bc = x + r
+    ; In the following equations:
+    ; 'p' is the current position along the movement axis
+    ; 'r' is the radius
+    ; 'Δp' is the movement
+    ; 'q' is the current position along the other axis
+    ; Also, the pseudofunctions Inc() and Exc() refer to the
+    ; tile containing a given point.  The only difference is
+    ; when the point lies exactly on a grid line, in which case
+    ; the right answer depends on whether the point is from the
+    ; top/left edge of a box or the bottom/right.
+    ; Points on the bottom/right edge of a box are considered
+    ; exclusive bounds, so that an entity can press right up
+    ; against a wall (entity's right edge = 32, wall's left edge
+    ; = 32) and not be considered to be overlapping it.
+    ; Inc() is just the high byte of a 12.4 position.  Exc() is
+    ; the high byte after subtracting the minimum possible
+    ; motion, which is $000.1.
+
+    ; First, figure out which 'columns' to check along the
+    ; p-axis.  (For y motion, these are actually rows.)  The
+    ; nearest column that might possibly be relevant is the next
+    ; one over from where we currently are (we never collide
+    ; with something we already overlap), and the furthest is
+    ; the one containing our target position.
+    ; Positive: Exc(p + r) + 1 to Exc(p + r + Δp)
+    ; Negative: Inc(p - r) - 1 to Inc(p - r + Δp)
+    ; At this point, bc should already contain the current
+    ; position.  Stick these grid columns in de, with the
+    ; closest in d (regardless of sign).
+IF _is_pos
+    Add8To16 bc, [hl]           ; bc = p + r
     ; Subtract the minimum movement (1 subpixel) to get
     ; the exclusive tile, and leave it like this since we'll
     ; need another exclusive tile in a moment
     dec bc
     ld d, b
-    inc d                       ; d = Exc(x + r) + 1
-    ; Put the FURTHEST column in e: Exc(x + r + dx)
-    ld hl, anise_vx
+    inc d                       ; d = Exc(p + r) + 1
+    ; Put the FURTHEST column in e: Exc(p + r + Δp)
+    ld hl, _p_vel
     ld a, [hl]
     add a, c
     ld c, a
     ld a, b
     adc a, 0
-    ld b, a                     ; bc = x + r + dx - MIN
-    ld e, b                     ; e = Exc(x + r + dx)
-    ; Loop over columns in [d, e].  (If d > e, this movement
-    ; doesn't cross a grid line; stop here.)
+    ld b, a                     ; bc = p + r + Δp - MIN
+    ld e, b                     ; e = Exc(p + r + Δp)
+ELSE
+    Sub8From16 bc, [hl]         ; bc = p - r
+    ld d, b
+    dec d                       ; d = Inc(p - r) - 1
+    ; Put the FURTHEST column in e: Inc(p - r + Δp)
+    ld hl, _p_vel
+    ld a, [hl]
+    add a, c
+    ld c, a
+    ld a, b
+    adc a, $ff
+    ld b, a                     ; bc = p - r + Δp
+    ld e, b                     ; e = Inc(p - r + Δp)
+ENDC
+
+    ; Loop over columns, adjusting d until it meets e.  Note
+    ; that d changes in the direction of movement, so the test
+    ; is different depending on sign.  (If d is already beyond
+    ; e, this motion doesn't cross a grid line, so there's
+    ; nothing to do.)
+IF _is_pos
     ld a, e
     cp d
-    jp c, .no_hits_x
+ELSE
+    ld a, d
+    cp e
+ENDC
+    jp c, .no_hits\@
 
     ; For each column we might cross: check whether any of the
     ; rows we currently overlap will block us.
-    ; Set bc to the minimum and maximum tile y we /already
-    ; touch/, which are Inc(y - r) and Exc(y + r).
-    ; TODO these are the same every iteration, no need to
-    ; recompute; does b even change?
+    ; Set bc to the minimum and maximum tile q we /already
+    ; touch/, which are Inc(q - r) and Exc(q + r).
     ; TODO document what registers are at various stages here
     ld hl, ANISE_RADIUS
     ; Load c first, since it uses Exc() which means we want
     ; 16-bit decrement
-    ld a, [anise_y + 1]
+    ld a, [_q_pos + 1]
     add a, [hl]
     ld c, a
-    ld a, [anise_y]
+    ld a, [_q_pos]
     adc a, 0
     ld b, a
     dec bc
-    ld c, b                     ; c = Exc(y + r)
-    ld a, [anise_y + 1]
+    ld c, b                     ; c = Exc(q + r)
+    ld a, [_q_pos + 1]
     sub a, [hl]
-    ld a, [anise_y]
+    ld a, [_q_pos]
     sbc a, 0
-    ld b, a                     ; b = Inc(y - r)
+    ld b, a                     ; b = Inc(q - r)
 
-.x_row_scan:
+.main_scan\@:
     ; Column scan may run multiple times, so preserve the
     ; initial state of b/c
     push bc
 
-.x_column_scan:
-    ; Fetch flags for the cell at 
+.perpendicular_scan\@:
+    ; Fetch flags for this cell
     push bc
+IF _is_x
+    ; x is d, y is c which is already in place
     ld b, d
+ELSE
+    ; x is c, y is d
+    ld b, c
+    ld c, d
+ENDC
     call get_cell_flags
     pop bc
     ; Check yon flag
     and a, $01
-    jr z, .not_blocked
+    jr z, .not_blocked\@
     ; If the flag is set, we're blocked!  This is as far as we
-    ; go.  Set x to match this cell (d) minus our radius
+    ; go.  Set p so that we're only just touching this cell.
     ; TODO we should finish up the column scan at least
-    ; TODO also should zero out vy
+    ; TODO also should zero out velocity
 ; NEG: this is slightly different, but also i don't much like
 ; having this in the middle of this loop anyway
+IF _is_pos
+    ; Positive case: the tile's starting edge (which is the tile
+    ; number and 00), minus our radius
     ld b, d
     xor a
     sub a, [hl]
@@ -510,183 +570,109 @@ ENDM
     ld a, d
     sbc a, 0
     ld b, a
-    ld [anise_x], a
-    ld a, c
-    ld [anise_x + 1], a
-    pop bc                      ; restore column scan params (urgh)
-    jp .done_x
-.not_blocked:
-    ; Not blocked, so keep looking
-    dec c
-    ld a, c
-    cp b
-    jr nc, .x_column_scan
-    pop bc                      ; restore column scan params
-
-    ; Finished checking one column successfully, so continue on
-    ; to the next one
-; NEG this is different too, dang
-    inc d
-    ld a, e
-    cp d
-    jr nc, .x_row_scan
-
-.no_hits_x:
-    ; Done, and we never hit anything!  Update our position to
-    ; what was requested
-    ld a, [anise_vx]
-    ld hl, anise_x + 1
-    add a, [hl]
-    ld [hl-], a
-    ld a, [hl]
-    adc a, 0
-    ; XXX compensate for world wrapping at 256 by manually
-    ; wrapping position here!
-    and a, $0f
-    ld [hl], a
-    jp .done_x
-
-.negative_x:
-; NEG: all of this is different really
-    ld hl, ANISE_RADIUS
-    ; Put the NEAREST column in d: Inc(x - r) - 1
-    ; moving RIGHT: Exc(x + r) + 1 => Exc(x + r + dx)
-    ; moving LEFT: Inc(x - r + dx) <= Inc(x - r) - 1
-    ; bc: x
-    ld a, c
-    sub a, [hl]
-    ld c, a
-    ld a, b
-    sbc a, 0
-    ld b, a                     ; bc = x - r
-    ld d, b
-    dec d                       ; d = Inc(x - r) - 1
-    ; Put the FURTHEST column in e: Inc(x - r + dx)
-    ld hl, anise_vx
-    ld a, [hl]
-    add a, c
-    ld c, a
-    ld a, b
-    adc a, $ff
-    ld b, a                     ; bc = x - r + dx
-    ld e, b                     ; e = Inc(x - r + dx)
-        push hl
-        ld hl, anise_x_range
-        ld a, d
-        ld [hl+], a
-        ld a, e
-        ld [hl], a
-        pop hl
-    ; Loop over columns in [e, d].  (If e > d, this movement
-    ; doesn't cross a grid line; stop here.)
-    ld a, d
-    cp e
-    jp c, .no_hits_x2
-
-    ; For each column we might cross: check whether any of the
-    ; rows we currently overlap will block us.
-    ; Set bc to the minimum and maximum tile y we /already
-    ; touch/, which are Inc(y - r) and Exc(y + r).
-    ; TODO these are the same every iteration, no need to
-    ; recompute; does b even change?
-    ; TODO document what registers are at various stages here
-    ld hl, ANISE_RADIUS
-    ; Load c first, since it uses Exc() which means we want
-    ; 16-bit decrement
-    ld a, [anise_y + 1]
-    add a, [hl]
-    ld c, a
-    ld a, [anise_y]
-    adc a, 0
-    ld b, a
-    dec bc
-    ld c, b                     ; c = Exc(y + r)
-    ld a, [anise_y + 1]
-    sub a, [hl]
-    ld a, [anise_y]
-    sbc a, 0
-    ld b, a                     ; b = Inc(y - r)
-        push hl
-        ld hl, anise_y_range
-        ld a, b
-        ld [hl+], a
-        ld a, c
-        ld [hl], a
-        pop hl
-
-.x_row_scan2:
-    ; Column scan may run multiple times, so preserve the
-    ; initial state of b/c
-    push bc
-
-.x_column_scan2:
-    ; Fetch flags for the cell at 
-    push bc
-    ld b, d
-    call get_cell_flags
-    pop bc
-    ; Check yon flag
-    and a, $01
-    jr z, .not_blocked2
-    ; If the flag is set, we're blocked!  This is as far as we
-    ; go.  Set x to match this cell (d) plus its width plus our
-    ; radius
-    ; TODO we should finish up the column scan at least
-    ; TODO also should zero out vy
-; NEG: this is slightly different, but also i don't much like
-; having this in the middle of this loop anyway
+ELSE
+    ; Negative case: the tile's ending edge (which is the tile
+    ; number plus one and 00), plus our radius -- but we're
+    ; adding our radius to zero so we can skip that bit
     ld b, d
     inc b                       ; b = this cell, plus 1
     ld a, [hl]
     ld c, a                     ; c = our radius
     ; TODO that's a bit redundant, could do this with just a
+ENDC
+
     ld a, b
-    ld [anise_x], a
+    ld [_p_pos], a
     ld a, c
-    ld [anise_x + 1], a
+    ld [_p_pos + 1], a
     pop bc                      ; restore column scan params (urgh)
-    jp .done_x
-.not_blocked2:
+    jp \3
+.not_blocked\@:
     ; Not blocked, so keep looking
     dec c
     ld a, c
     cp b
-    jr nc, .x_column_scan2
+    jr nc, .perpendicular_scan\@
     pop bc                      ; restore column scan params
 
     ; Finished checking one column successfully, so continue on
     ; to the next one
-; NEG this is different too, dang
+IF _is_pos
+    inc d
+    ld a, e
+    cp d
+ELSE
     dec d
     ld a, d
     cp e
-    jr nc, .x_row_scan2
+ENDC
+    jr nc, .main_scan\@
 
-.no_hits_x2:
+.no_hits\@:
     ; Done, and we never hit anything!  Update our position to
     ; what was requested
-    ld a, [anise_vx]
-    ld hl, anise_x + 1
+    ld a, [_p_vel]
+    ld hl, _p_pos + 1
     add a, [hl]
     ld [hl-], a
     ld a, [hl]
+IF _is_pos
+    adc a, 0
+ELSE
     adc a, $ff
+ENDC
     ; XXX compensate for world wrapping at 256 by manually
     ; wrapping position here!
     and a, $0f
     ld [hl], a
-    jp .done_x
+    jp \3
+PURGE _p_pos, _q_pos, _p_vel, _q_vel
+ENDM
 
+    ; x axis
+    ; Load current x position into bc
+    ld hl, anise_x
+    ld a, [hl+]
+    ld b, a
+    ld c, [hl]
+    ld a, b
+    ; Check x velocity (i.e. movement).  Positive and negative
+    ; are, alas, separate cases; zero means skip entirely
+    ld hl, anise_vx
+    ld a, [hl]
+    cp a, $80
+    jp nc, .negative_x
+    or a
+    jp z, .done_x
+    ; FIXME: risk of over/underflow near edges with the +1/-1
+
+.positive_x:
+    CheckCollision 0, 1, .done_x
+.negative_x:
+    CheckCollision 0, 0, .done_x
 .done_x:
 
-    ; Update canonical position (y only, x is handled above)
-    ld hl, anise_y + 1
-    ld a, [anise_vy]
-    add a, [hl]
-    ld [hl-], a
+    ; y axis
+    ; Load current y position into bc
+    ld hl, anise_y
+    ld a, [hl+]
+    ld b, a
+    ld c, [hl]
+    ld a, b
+    ; Check y velocity (i.e. movement).  Positive and negative
+    ; are, alas, separate cases; zero means skip entirely
+    ld hl, anise_vy
     ld a, [hl]
-    adc a, 0
-    ld [hl], a
+    cp a, $80
+    jp nc, .negative_y
+    or a
+    jp z, .done_y
+
+.positive_y:
+    CheckCollision 1, 1, .done_y
+.negative_y:
+    CheckCollision 1, 0, .done_y
+.done_y:
 
     ; Update sprite positions, hackily
     ; Load x coordinate into b, with 12.4 -> 8 conversion
