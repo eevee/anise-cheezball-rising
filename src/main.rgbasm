@@ -153,9 +153,17 @@ start:
     ld a, LOW(ANISE_TEST_TILES)
     ld [anise_sprites_address + 1], a
 
-    ld a, 64
+    ; Place Anise at 64, 64, which in 12.4 is $04 $00
+    ; TODO probably make a helper for this
+    ld a, $04
     ld [anise_x], a
     ld [anise_y], a
+    xor a
+    ld [anise_x + 1], a
+    ld [anise_y + 1], a
+    ld [anise_vx], a
+    ld [anise_vy], a
+    ; And init some other stuff
     ld a, FACING_DOWN
     ld [anise_facing], a
     ld a, ANIMATION_LENGTH
@@ -170,9 +178,29 @@ start:
 
     ; ANTENNA
     ld hl, anise_x              ; b/c = x/y
-    ld b, [hl]
-    inc hl
-    ld c, [hl]
+    ; Load x coordinate into b, with 12.4 -> 8 conversion
+    ; aaaabbbb ccccdddd => bbbbcccc
+    ; TODO should of course subtract the camera offset and
+    ; whatnot
+    ld a, [hl+]                 ; a = aaaabbbb
+    swap a                      ; a = bbbbaaaa
+    and a, $f0                  ; a = bbbb0000
+    ld b, a                     ; b = bbbb0000
+    ld a, [hl+]                 ; a = ccccdddd
+    swap a                      ; a = ddddcccc
+    and a, $0f                  ; a = 0000cccc
+    or a, b                     ; a = bbbbcccc
+    ld b, a                     ; b = bbbbcccc
+    ; Load y coordinate into c
+    ld a, [hl+]
+    swap a
+    and a, $f0
+    ld c, a
+    ld a, [hl+]
+    swap a
+    and a, $0f
+    or a, c
+    ld c, a
     ld hl, ANISE_SPRITE_POSITIONS
     ; x-coord
     ld a, [hl+]
@@ -322,25 +350,32 @@ ANISE_SPRITE_ANGLED EQU 1
 ; update portrait
 
     ; Anise update loop
+    ; TODO holding left+right simultaneously no longer produces
+    ; zero, boo
+    ; TODO maybe handle x/y separately and more... deliberately
+    xor a
+    ld [anise_vx], a
+    ld [anise_vy], a
     ld a, [buttons]
-    ; b/c: dx/dy
-    ld b, 0
-    ld c, 0
     bit PADB_LEFT, a
     jr z, .skip_left
-    dec b
+    ld hl, anise_vx
+    ld [hl], $f0
 .skip_left:
     bit PADB_RIGHT, a
     jr z, .skip_right
-    inc b
+    ld hl, anise_vx
+    ld [hl], $10
 .skip_right:
     bit PADB_UP, a
     jr z, .skip_up
-    dec c
+    ld hl, anise_vy
+    ld [hl], $f0
 .skip_up:
     bit PADB_DOWN, a
     jr z, .skip_down
-    inc c
+    ld hl, anise_vy
+    ld [hl], $10
 .skip_down:
 
     ; Collision detection!  General approach is as follows:
@@ -376,48 +411,82 @@ ENDM
     ; after the one containing our leading edge.  The FURTHEST
     ; is the column that /will/ contain our leading edge, if the
     ; movement is successful.
+    ; bc: current x position
+    ld hl, anise_x
+    ld a, [hl+]
+    ld b, a
+    ld c, [hl]
     ld a, b
+    ; a: current x velocity (= movement)
+    ld hl, anise_vx
+    ld a, [hl]
     cp a, $80
     jp nc, .negative_x
+    or a
+    jp z, .done_x
     ; FIXME: risk of over/underflow near edges with the +1/-1
 .positive_x:
+; NEG: all of this is different really
     ld hl, ANISE_RADIUS
     ; Put the NEAREST column in d: Exc(x + r) + 1
     ; moving RIGHT: Exc(x + r) + 1 => Exc(x + r + dx)
     ; moving LEFT: Inc(x - r + dx) <= Inc(x - r) - 1
-    ld a, [anise_x]             ; a = x
-    add a, [hl]                 ; a = x + r
-    ld e, a                     ; e = x + r
-    ToExclusiveCell
-    inc a                       ; a = Exc(x + r) + 1
-    ld d, a                     ; d = Exc(x + r) + 1
+    ; bc: x
+    ld a, [hl]
+    add a, c
+    ld c, a
+    ld a, b
+    adc a, 0
+    ld b, a                     ; bc = x + r
+    ; Subtract the minimum movement (1 subpixel) to get
+    ; the exclusive tile, and leave it like this since we'll
+    ; need another exclusive tile in a moment
+    dec bc
+    ld d, b
+    inc d                       ; d = Exc(x + r) + 1
     ; Put the FURTHEST column in e: Exc(x + r + dx)
-    ld a, e                     ; a = x + r
-    add a, b                    ; a = x + r + dx
-    ToExclusiveCell
-    ld e, a                     ; e = Inc(x + r + dx)
+    ld hl, anise_vx
+    ld a, [hl]
+    add a, c
+    ld c, a
+    ld a, b
+    adc a, 0
+    ld b, a                     ; bc = x + r + dx - MIN
+    ld e, b                     ; e = Exc(x + r + dx)
     ; Loop over columns in [d, e].  (If d > e, this movement
     ; doesn't cross a grid line; stop here.)
     ld a, e
     cp d
-    jp c, .done_x
-    ; Don't need dx/dy atm, so stash bc for some scratch space
-    push bc
-.x_row_scan:
+    jp c, .no_hits_x
+
     ; For each column we might cross: check whether any of the
-    ; rows we currently overlap will block us
+    ; rows we currently overlap will block us.
+    ; Set bc to the minimum and maximum tile y we /already
+    ; touch/, which are Inc(y - r) and Exc(y + r).
     ; TODO these are the same every iteration, no need to
     ; recompute; does b even change?
     ; TODO document what registers are at various stages here
-    ld a, [anise_y]
     ld hl, ANISE_RADIUS
-    sub a, [hl]
-    ToInclusiveCell
-    ld b, a                     ; b = minimum y
-    ld a, [anise_y]
+    ; Load c first, since it uses Exc() which means we want
+    ; 16-bit decrement
+    ld a, [anise_y + 1]
     add a, [hl]
-    ToExclusiveCell
-    ld c, a                     ; c = maximum/current y
+    ld c, a
+    ld a, [anise_y]
+    adc a, 0
+    ld b, a
+    dec bc
+    ld c, b                     ; c = Exc(y + r)
+    ld a, [anise_y + 1]
+    sub a, [hl]
+    ld a, [anise_y]
+    sbc a, 0
+    ld b, a                     ; b = Inc(y - r)
+
+.x_row_scan:
+    ; Column scan may run multiple times, so preserve the
+    ; initial state of b/c
+    push bc
 
 .x_column_scan:
     ; Fetch flags for the cell at 
@@ -431,16 +500,20 @@ ENDM
     ; If the flag is set, we're blocked!  This is as far as we
     ; go.  Set x to match this cell (d) minus our radius
     ; TODO we should finish up the column scan at least
-    ld a, d
-    sla a
-    sla a
-    sla a
+    ; TODO also should zero out vy
+; NEG: this is slightly different, but also i don't much like
+; having this in the middle of this loop anyway
+    ld b, d
+    xor a
     sub a, [hl]
+    ld c, a
+    ld a, d
+    sbc a, 0
+    ld b, a
     ld [anise_x], a
-    ; TODO this pop is mad confusing
-    pop bc
-    ; TODO need this because there's still an "update" below
-    ld b, 0
+    ld a, c
+    ld [anise_x + 1], a
+    pop bc                      ; restore column scan params (urgh)
     jp .done_x
 .not_blocked:
     ; Not blocked, so keep looking
@@ -448,63 +521,103 @@ ENDM
     ld a, c
     cp b
     jr nc, .x_column_scan
+    pop bc                      ; restore column scan params
 
     ; Finished checking one column successfully, so continue on
     ; to the next one
+; NEG this is different too, dang
     inc d
     ld a, e
     cp d
     jr nc, .x_row_scan
 
+.no_hits_x:
     ; Done, and we never hit anything!  Update our position to
     ; what was requested
-    pop bc
-    ld a, [anise_x]
-    add a, b
-    ld [anise_x], a
-    ; TODO need this because there's still an "update" below
-    ld b, 0
-
+    ld a, [anise_vx]
+    ld hl, anise_x + 1
+    add a, [hl]
+    ld [hl-], a
+    ld a, [hl]
+    adc a, 0
+    ; XXX compensate for world wrapping at 256 by manually
+    ; wrapping position here!
+    and a, $0f
+    ld [hl], a
     jp .done_x
 
 .negative_x:
-    ; TODO i would REALLY LOVE if this weren't all totally
-    ; duplicated.
+; NEG: all of this is different really
     ld hl, ANISE_RADIUS
     ; Put the NEAREST column in d: Inc(x - r) - 1
-    ld a, [anise_x]             ; a = x
-    sub a, [hl]                 ; a = x - r
-    ld e, a                     ; e = x - r
-    ToInclusiveCell
-    dec a                       ; a = Inc(x - r) - 1
-    ld d, a                     ; d = Inc(x - r) - 1
+    ; moving RIGHT: Exc(x + r) + 1 => Exc(x + r + dx)
+    ; moving LEFT: Inc(x - r + dx) <= Inc(x - r) - 1
+    ; bc: x
+    ld a, c
+    sub a, [hl]
+    ld c, a
+    ld a, b
+    sbc a, 0
+    ld b, a                     ; bc = x - r
+    ld d, b
+    dec d                       ; d = Inc(x - r) - 1
     ; Put the FURTHEST column in e: Inc(x - r + dx)
-    ld a, e                     ; a = x - r
-    add a, b                    ; a = x - r + dx
-    ToInclusiveCell
-    ld e, a                     ; e = Inc(x - r + dx)
-    ; Loop over columns in [d, e].  (If e > d, this movement
+    ld hl, anise_vx
+    ld a, [hl]
+    add a, c
+    ld c, a
+    ld a, b
+    adc a, $ff
+    ld b, a                     ; bc = x - r + dx
+    ld e, b                     ; e = Inc(x - r + dx)
+        push hl
+        ld hl, anise_x_range
+        ld a, d
+        ld [hl+], a
+        ld a, e
+        ld [hl], a
+        pop hl
+    ; Loop over columns in [e, d].  (If e > d, this movement
     ; doesn't cross a grid line; stop here.)
     ld a, d
     cp e
-    jp c, .done_x
-    ; Don't need dx/dy atm, so stash bc for some scratch space
-    push bc
-.x_row_scan2:
+    jp c, .no_hits_x2
+
     ; For each column we might cross: check whether any of the
-    ; rows we currently overlap will block us
+    ; rows we currently overlap will block us.
+    ; Set bc to the minimum and maximum tile y we /already
+    ; touch/, which are Inc(y - r) and Exc(y + r).
     ; TODO these are the same every iteration, no need to
     ; recompute; does b even change?
     ; TODO document what registers are at various stages here
-    ld a, [anise_y]
     ld hl, ANISE_RADIUS
-    sub a, [hl]
-    ToInclusiveCell
-    ld b, a                     ; b = minimum y
-    ld a, [anise_y]
+    ; Load c first, since it uses Exc() which means we want
+    ; 16-bit decrement
+    ld a, [anise_y + 1]
     add a, [hl]
-    ToExclusiveCell
-    ld c, a                     ; c = maximum/current y
+    ld c, a
+    ld a, [anise_y]
+    adc a, 0
+    ld b, a
+    dec bc
+    ld c, b                     ; c = Exc(y + r)
+    ld a, [anise_y + 1]
+    sub a, [hl]
+    ld a, [anise_y]
+    sbc a, 0
+    ld b, a                     ; b = Inc(y - r)
+        push hl
+        ld hl, anise_y_range
+        ld a, b
+        ld [hl+], a
+        ld a, c
+        ld [hl], a
+        pop hl
+
+.x_row_scan2:
+    ; Column scan may run multiple times, so preserve the
+    ; initial state of b/c
+    push bc
 
 .x_column_scan2:
     ; Fetch flags for the cell at 
@@ -516,20 +629,22 @@ ENDM
     and a, $01
     jr z, .not_blocked2
     ; If the flag is set, we're blocked!  This is as far as we
-    ; go.  Set x to match this cell (d), plus its width, plus
-    ; our radius
+    ; go.  Set x to match this cell (d) plus its width plus our
+    ; radius
     ; TODO we should finish up the column scan at least
-    ld a, d
-    inc a
-    sla a
-    sla a
-    sla a
-    add a, [hl]
+    ; TODO also should zero out vy
+; NEG: this is slightly different, but also i don't much like
+; having this in the middle of this loop anyway
+    ld b, d
+    inc b                       ; b = this cell, plus 1
+    ld a, [hl]
+    ld c, a                     ; c = our radius
+    ; TODO that's a bit redundant, could do this with just a
+    ld a, b
     ld [anise_x], a
-    ; TODO this pop is mad confusing
-    pop bc
-    ; TODO need this because there's still an "update" below
-    ld b, 0
+    ld a, c
+    ld [anise_x + 1], a
+    pop bc                      ; restore column scan params (urgh)
     jp .done_x
 .not_blocked2:
     ; Not blocked, so keep looking
@@ -537,42 +652,67 @@ ENDM
     ld a, c
     cp b
     jr nc, .x_column_scan2
+    pop bc                      ; restore column scan params
 
     ; Finished checking one column successfully, so continue on
     ; to the next one
+; NEG this is different too, dang
     dec d
     ld a, d
     cp e
     jr nc, .x_row_scan2
 
+.no_hits_x2:
     ; Done, and we never hit anything!  Update our position to
     ; what was requested
-    pop bc
-    ld a, [anise_x]
-    add a, b
-    ld [anise_x], a
-    ; TODO need this because there's still an "update" below
-    ld b, 0
+    ld a, [anise_vx]
+    ld hl, anise_x + 1
+    add a, [hl]
+    ld [hl-], a
+    ld a, [hl]
+    adc a, $ff
+    ; XXX compensate for world wrapping at 256 by manually
+    ; wrapping position here!
+    and a, $0f
+    ld [hl], a
+    jp .done_x
 
 .done_x:
 
-    ; Set d to dx|dy, which is nonzero iff we moved
-    ld a, b
-    or a, c
-    ld d, a
-
-    ; Update canonical position
-    ld a, [anise_x]
-    add a, b
-    ld b, a
-    ld [anise_x], a
-    ld a, [anise_y]
-    add a, c
-    ld c, a
-    ld [anise_y], a
+    ; Update canonical position (y only, x is handled above)
+    ld hl, anise_y + 1
+    ld a, [anise_vy]
+    add a, [hl]
+    ld [hl-], a
+    ld a, [hl]
+    adc a, 0
+    ld [hl], a
 
     ; Update sprite positions, hackily
-    ; Here, b/c are already x/y
+    ; Load x coordinate into b, with 12.4 -> 8 conversion
+    ; aaaabbbb ccccdddd => bbbbcccc
+    ; TODO should of course subtract the camera offset and
+    ; whatnot
+    ld hl, anise_x
+    ld a, [hl+]                 ; a = aaaabbbb
+    swap a                      ; a = bbbbaaaa
+    and a, $f0                  ; a = bbbb0000
+    ld b, a                     ; b = bbbb0000
+    ld a, [hl+]                 ; a = ccccdddd
+    swap a                      ; a = ddddcccc
+    and a, $0f                  ; a = 0000cccc
+    or a, b                     ; a = bbbbcccc
+    ld b, a                     ; b = bbbbcccc
+    ; Load y coordinate into c
+    ld a, [hl+]
+    swap a
+    and a, $f0
+    ld c, a
+    ld a, [hl+]
+    swap a
+    and a, $0f
+    or a, c
+    ld c, a
     ; ANTENNA
     ld hl, ANISE_SPRITE_POSITIONS
     ; x-coord
@@ -644,8 +784,13 @@ ENDM
     ld [hl], FACING_DOWN
 .skip_down2:
 
-    xor a
-    or d
+    ; Check whether we /tried/ to move, i.e., any button is
+    ; currently pressed
+    ; TODO this is not very good and won't work for non-players
+    ; TODO this should really be an 'idle' pose and reset from
+    ; the beginning etc
+    ld a, [buttons]
+    and a, PADF_UP | PADF_DOWN | PADF_LEFT | PADF_RIGHT
     jp z, .no_movement
 
     ld a, [anise_frame_countdown]
@@ -717,6 +862,7 @@ get_cell_flags:
     ld d, 0
     ld e, b
     add hl, de
+    add hl, de
     ; Add y coordinate, with stride of 32, which we can do
     ; without multiplying by shifting left 5
     ld d, c
@@ -729,16 +875,11 @@ get_cell_flags:
     and a, $e0
     ld e, a
     add hl, de
+    add hl, de
     ; Get the cell itself
     ld a, [hl]
     ; I don't have real flags at the moment, so, fake it
     cp a, 2
-    jr z, .blocking
-    cp a, 3
-    jr z, .blocking
-    cp a, 12
-    jr z, .blocking
-    cp a, 13
     jr z, .blocking
     jr .not_blocking
 .blocking:
@@ -852,7 +993,7 @@ ANISE_ACTOR_INFO:
     ; Walk pose
     db 0, 4
 ANISE_RADIUS:
-    db 3
+    db 3 << 4
 ANISE_SPRITE_POSITIONS:
     db -2, -20
     db -8, -14
@@ -878,10 +1019,21 @@ buttons_pressed:
     db
 buttons_released:
     db
+; Position, two words per coordinate, as 12.4 fixed point.
+; This has the advantage that the high word is grid cell
 anise_x:
-    db
+    dw
 anise_y:
-    db
+    dw
+; Velocity, in pixels per tic, as 11.4 fixed point.
+; TODO i only really /need/ 3.4 but i don't know how to handle
+; the sign then...
+anise_vx:
+    dw
+anise_vy:
+    dw
+anise_x_range: dw
+anise_y_range: dw
 anise_facing:
     db
 anise_pose:
