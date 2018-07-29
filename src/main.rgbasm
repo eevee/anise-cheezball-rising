@@ -6,6 +6,9 @@ FACING_UP     EQU 1
 FACING_RIGHT  EQU 2
 FACING_LEFT   EQU 3
 
+BYTES_PER_TILE EQU 16
+BYTES_PER_OBJECT EQU 32
+
 ANIMATION_LENGTH EQU 5
 
 dcolor: MACRO  ; COLOR($rrggbb) -> gbc representation
@@ -166,6 +169,8 @@ start:
     ; And init some other stuff
     ld a, FACING_DOWN
     ld [anise_facing], a
+    ld a, 0  ; idle
+    ld [anise_pose], a
     ld a, ANIMATION_LENGTH
     ld [anise_frame_countdown], a
 
@@ -745,10 +750,20 @@ ENDM
     add a, 16
     ld [oam_buffer + 12], a
 
-    ; Figure out which way we're facing, based on which (if any) button is newly-pressed this frame
+    ; ----------------------------------------------------------
+    ; Update sprite animation
+
+    ; Use e to store whether the sprite we ultimately show this
+    ; frame is a new one -- i.e. if the facing or pose changed.
+    ld e, 0
+
+    ; Figure out which way we're facing, based on which (if any)
+    ; button is newly-pressed this frame
     ; TODO hey i could just keep shifting and...  wait is there any point to that, maybe it's faster?
     ; TODO whoops, this doesn't work if you let go of the button.
+    ; Previous facing goes in b
     ld hl, anise_facing
+    ld b, [hl]
     ld a, [buttons_pressed]
     bit PADB_LEFT, a
     jr z, .skip_left2
@@ -770,56 +785,101 @@ ENDM
     ld [hl], FACING_DOWN
 .skip_down2:
 
-    ; Check whether we /tried/ to move, i.e., any button is
-    ; currently pressed
+    ; Restart the animation if the facing changed
+    ld a, [hl]
+    cp b
+    jr z, .skip_facing_changed
+    ld e, 1
+.skip_facing_changed:
+
+    ; First figure out what the animation /is/.  For now, there
+    ; are only two options: idle and walking.  If we tried to
+    ; move (i.e. any direction is currently pressed), we're
+    ; walking; otherwise, idle.
     ; TODO this is not very good and won't work for non-players
     ; TODO this should really be an 'idle' pose and reset from
     ; the beginning etc
     ld a, [buttons]
     and a, PADF_UP | PADF_DOWN | PADF_LEFT | PADF_RIGHT
-    jp z, .no_movement
+    ; Use 1 for walking, 0 for idle for now
+    ld d, 0
+    jr z, .pose_idle
+    ld d, 1
+.pose_idle:
 
+    ; Restart the animation if the pose changed
+    ld a, [anise_pose]
+    cp d
+    jr z, .pose_unchanged
+    ld e, 1
+.pose_unchanged:
+
+    ; Check whether to actually do anything.
+    ; If the animation is forcibly being restarted, we restart
+    ; at frame zero and skip these checks.
+    bit 0, e
+    jr z, .static_pose_check
+    ld a, d
+    ld [anise_pose], a
+    xor a
+    ld [anise_frame], a
+    jr .skip_static_pose_check
+
+.static_pose_check:
+    ; If this is a static pose (i.e. idle), there's only one
+    ; frame of animation, so nothing to do here.
+    ld a, d
+    cp a, 0
+    jp z, .no_movement
+    ; Otherwise, tick down the frame counter.  If it doesn't hit
+    ; zero, there's nothing to do.
     ld a, [anise_frame_countdown]
     dec a
     ld [anise_frame_countdown], a
     jp nz, .no_movement
-    ; TODO i jump when it hits zero, so will this skip a frame, or no because this is one of the frames
+
+    ; If it /did/ hit zero, bump to the next frame.  (This
+    ; happens before the following label so it doesn't clobber
+    ; setting the frame to 0 for a restarted animation.)
+    ld a, [anise_frame]
+    inc a
+    and a, 4 - 1
+    ld [anise_frame], a
+
+.skip_static_pose_check:
+
+    ; This is the start of a frame, so restart the countdown
     ld a, ANIMATION_LENGTH
     ld [anise_frame_countdown], a
 
-    ; Anise has a unique sprite, so overwrite the current tile rather than
-    ; changing tiles
+    ; Anise has a unique sprite, so overwrite the current tile
+    ; rather than changing tiles
     ld hl, ANISE_TEST_TILES
 
-    ; Skip ahead a number of /rows/ of tiles, corresponding to anise's facing
+    ; Armed with a pose and a frame, find where it actually is!
+    ; First find the frame's row; there are 4 facing columns in
+    ; a sheet, so stride over 4 facings * 3 sprites per frame
+    ld a, [anise_frame]
+    or a
+    jr z, .skip_stride_frame
+    ld bc, 4 * 3 * BYTES_PER_OBJECT
+.stride_frame:
+    add hl, bc
+    dec a
+    jr nz, .stride_frame
+.skip_stride_frame:
+
+    ; Next find the facing, which is the column
     ld a, [anise_facing]
     and a, %11                      ; cap to 4, just in case
     jr z, .skip_stride_facing       ; handle zero case
-    ; TODO unhardcode frame count (oof)
-    ld bc, 4 * 3 * 2 * 16           ; frames * parts * tiles * bytes per tile
+    ld bc, 3 * BYTES_PER_OBJECT
 .stride_facing:
     add hl, bc
     dec a
     jr nz, .stride_facing
 .skip_stride_facing:
 
-    ; Note that this part always needs to happen!!  I'm just doing it here to
-    ; avoid loading anise_frame again in the next bit
-    ; TODO need to reset the frame when direction changes (and when pose changes)
-    ld a, [anise_frame]
-    inc a
-    and a, 4 - 1
-    ld [anise_frame], a
-
-    ; Skip ahead 3 sprites * the current frame
-    ld bc, 3 * 2 * 16               ; parts * tiles * bytes per tile
-    or a
-    jr z, .skip_stride_frame
-.stride_frame:
-    add hl, bc
-    dec a
-    jr nz, .stride_frame
-.skip_stride_frame:
     ; Store the new sprite address, to be updated during vblank
     ld a, h
     ld [anise_sprites_address], a
@@ -1069,7 +1129,6 @@ SCREEN_WIDTH_TILES EQU 20
 CANVAS_WIDTH_TILES EQU 32
 SCREEN_HEIGHT_TILES EQU 18
 CANVAS_HEIGHT_TILES EQU 32
-BYTES_PER_TILE EQU 16
 TEXT_START_TILE_1 EQU 128
 TEXT_START_TILE_2 EQU TEXT_START_TILE_1 + SCREEN_WIDTH_TILES * 2
 

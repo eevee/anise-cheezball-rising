@@ -122,10 +122,6 @@ def main(tiled_map_path):
                 print()
             small_tile_index += 1
 
-    print(); print()
-    print(small_tile_index)
-    import pprint; pprint.pprint(big_tile_subtiles)
-
     # -------------------------------------------------------------------------
 
     print("TEST_MAP_1:")
@@ -209,10 +205,6 @@ def main(image_path):
                         print(index, end='')
                     print()
                 small_tile_index += 1
-
-    print(); print()
-    print(small_tile_index)
-    import pprint; pprint.pprint(big_tile_subtiles)
 
 
 if __name__ == '__main__':
