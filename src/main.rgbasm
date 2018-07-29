@@ -704,8 +704,21 @@ ENDM
     and a, $0f
     or a, c
     ld c, a
-    ; ANTENNA
+    ; Get the table of sprite offsets.  Note that these can be
+    ; different depending on the facing angle (thanks, Anise)!
+    ; FIXME whoops i seem to have hardcoded the size of the
+    ; table here
     ld hl, ANISE_SPRITE_POSITIONS
+    ld a, [anise_facing]
+    ld de, 6
+    or a
+    jr z, .skip_stride_facing_positions
+.stride_facing_positions:
+    add hl, de
+    dec a
+    jr nz, .stride_facing_positions
+.skip_stride_facing_positions:
+    ; ANTENNA
     ; x-coord
     ld a, [hl+]
     add a, b
@@ -821,7 +834,9 @@ ENDM
     jr z, .static_pose_check
     ld a, d
     ld [anise_pose], a
-    xor a
+    ; FIXME this cleverly starts walking at frame 1, which means
+    ; tapping a direction will continually put a foot out rather
+    ; than gradually sliding.  but it's not a /great/ solution
     ld [anise_frame], a
     jr .skip_static_pose_check
 
@@ -1041,10 +1056,22 @@ ANISE_ACTOR_INFO:
 ANISE_RADIUS:
     db 3 << 4
 ANISE_SPRITE_POSITIONS:
+    ; down
     db -2, -20
     db -8, -14
     db 0, -14
-    db -3, -3
+    ; up
+    db -7, -20
+    db -8, -14
+    db 0, -14
+    ; right
+    db -4, -20
+    db -8, -14
+    db 0, -14
+    ; left
+    db -4, -20
+    db -8, -14
+    db 0, -14
 ANISE_COLLISION_DEBUG:
     dw `22222200
     dw `22222200
