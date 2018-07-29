@@ -174,12 +174,7 @@ start:
     ld a, ANIMATION_LENGTH
     ld [anise_frame_countdown], a
 
-    ; Put an object on the screen, maybe.  Probably not.
-
-    ld hl, $8000 + 6 * 16
-    ld de, ANISE_COLLISION_DEBUG
-    ld c, 16
-    call copy
+    ; Put an object on the screen
 
     ; ANTENNA
     ld hl, anise_x              ; b/c = x/y
@@ -259,25 +254,7 @@ start:
     ld a, %00000001
     ld [oam_buffer + 11], a
 
-    ; DEBUG BIT
-    ; x-coord
-    ld a, [hl+]
-    add a, b
-    add a, 8
-    ld [oam_buffer + 13], a
-    ; y-coord
-    ld a, [hl+]
-    add a, c
-    add a, 16
-    ld [oam_buffer + 12], a
-    ; chr index
-    ld a, 6
-    ld [oam_buffer + 14], a
-    ; attributes
-    ld a, %00000001
-    ld [oam_buffer + 15], a
-
-    ; DMA something
+    ; Copy the DMA copy routine into HRAM
     ld de, dma_copy
     ld hl, $FF80
     ld c, dma_copy_end - dma_copy
@@ -751,17 +728,6 @@ ENDM
     add a, c
     add a, 16
     ld [oam_buffer + 8], a
-    ; DEBUG
-    ; x-coord
-    ld a, [hl+]
-    add a, b
-    add a, 8
-    ld [oam_buffer + 13], a
-    ; y-coord
-    ld a, [hl+]
-    add a, c
-    add a, 16
-    ld [oam_buffer + 12], a
 
     ; ----------------------------------------------------------
     ; Update sprite animation
@@ -1072,15 +1038,6 @@ ANISE_SPRITE_POSITIONS:
     db -4, -20
     db -8, -14
     db 0, -14
-ANISE_COLLISION_DEBUG:
-    dw `22222200
-    dw `22222200
-    dw `22222200
-    dw `22222200
-    dw `22222200
-    dw `22222200
-    dw `00000000
-    dw `00000000
 
 
 SECTION "Important twiddles", WRAM0[$C000]
