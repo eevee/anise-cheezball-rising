@@ -23,12 +23,19 @@ all: $(TARGET)
 $(BUILD)/font.inc: util/font-to-tiles.py data/font.png
 	$(PYTHON) util/font-to-tiles.py data/font.png > $(BUILD)/font.inc
 
+# TODO need to mkdir /tilesets
+# FIXME if these fail, they still leave the output file intact!!
+$(BUILD)/tilesets/anise.rgbasm: util/png-to-tiles.py data/tilesets/anise.png
+	$(PYTHON) util/png-to-tiles.py spritesheet data/tilesets/anise.png > $(BUILD)/tilesets/anise.rgbasm
+$(BUILD)/tilesets/cheezball.rgbasm: util/png-to-tiles.py data/tilesets/cheezball.png
+	$(PYTHON) util/png-to-tiles.py spritesheet data/tilesets/cheezball.png > $(BUILD)/tilesets/cheezball.rgbasm
+
 # The regular expected stuff
-# TODO: i've manually listed font.inc here because otherwise, on first build,
+# TODO: i've manually listed targets here because otherwise, on first build,
 # rgbasm will balk that it doesn't exist, so it'll never create the deps file,
 # so make will never know it needs to be built first.  this enforces build
 # order without supplying the explicit dependency.  is there a better fix?
-$(BUILD)/%.rgbasm.o: $(SRC)/%.rgbasm | $(BUILD)/font.inc
+$(BUILD)/%.rgbasm.o: $(SRC)/%.rgbasm | $(BUILD)/font.inc $(BUILD)/tilesets/anise.rgbasm $(BUILD)/tilesets/cheezball.rgbasm
 	$(RGBASM) -i $(SRC)/ -i $(BUILD)/ -M $(BUILD)/$*.rgbasm.deps -o $@ $<
 
 $(TARGET): $(OBJECTS)

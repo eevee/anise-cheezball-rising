@@ -9,6 +9,9 @@ FACING_LEFT   EQU 3
 BYTES_PER_TILE EQU 16
 BYTES_PER_OBJECT EQU 32
 
+SPRITESO_PALETTES EQU 0
+SPRITESO_TILES EQU 64
+
 ANIMATION_LENGTH EQU 5
 
 dcolor: MACRO  ; COLOR($rrggbb) -> gbc representation
@@ -144,21 +147,21 @@ start:
     ; Same thing but for an object palette
     ld a, %10000000
     ldh [rOCPS], a
-    ld hl, ANISE_TEST_PALETTES
+    ld hl, SPRITES_ANISE + SPRITESO_PALETTES
     REPT 16
     ld a, [hl+]
     ldh [rOCPD], a
     ENDR
-    ld hl, CHEEZBALL_TEST_PALETTES
+    ld hl, SPRITES_CHEEZBALL + SPRITESO_PALETTES
     REPT 16
     ld a, [hl+]
     ldh [rOCPD], a
     ENDR
 
     ; Define an object
-    ld a, HIGH(ANISE_TEST_TILES)
+    ld a, HIGH(SPRITES_ANISE + SPRITESO_TILES)
     ld [anise_sprites_address], a
-    ld a, LOW(ANISE_TEST_TILES)
+    ld a, LOW(SPRITES_ANISE + SPRITESO_TILES)
     ld [anise_sprites_address + 1], a
 
     ; Place Anise at 64, 64, which in 12.4 is $04 $00
@@ -260,7 +263,7 @@ start:
     ld [oam_buffer + 11], a
 
     ; Put cheezball on the screen, too
-    ld hl, CHEEZBALL_TEST_TILES
+    ld hl, SPRITES_CHEEZBALL + SPRITESO_TILES
     ld a, h
     ld [rHDMA1], a
     ld a, l
@@ -910,7 +913,7 @@ ENDM
 
     ; Anise has a unique sprite, so overwrite the current tile
     ; rather than changing tiles
-    ld hl, ANISE_TEST_TILES
+    ld hl, SPRITES_ANISE + SPRITESO_TILES
 
     ; Armed with a pose and a frame, find where it actually is!
     ; First find the frame's row; there are 4 facing columns in
@@ -1089,7 +1092,7 @@ fill:
 
 SECTION "Actor data", ROM0
 ANISE_ACTOR_INFO:
-    dw ANISE_TEST_TILES
+    dw SPRITES_ANISE + SPRITESO_TILES
     ; Idle pose
     db 0, 1
     ; Walk pose
@@ -1161,8 +1164,13 @@ oam_buffer:
     ds 4 * 40
 
 include "tilesets/testmap.rgbasm"
-include "tilesets/testanise.rgbasm"
-include "tilesets/testcheezball.rgbasm"
+
+SECTION "Anise sprites", ROM0, ALIGN[4]
+SPRITES_ANISE:
+    include "tilesets/anise.rgbasm"
+SECTION "Cheezball sprites", ROM0, ALIGN[4]
+SPRITES_CHEEZBALL:
+    include "tilesets/cheezball.rgbasm"
 
 SECTION "Font", ROMX
 text:

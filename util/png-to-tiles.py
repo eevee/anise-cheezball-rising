@@ -1,3 +1,4 @@
+import argparse
 import json
 from pathlib import Path
 import sys
@@ -5,11 +6,11 @@ import sys
 import PIL.Image
 
 
-TILE_SIZE = 8
-METATILE_SIZE = 16
+CHAR_SIZE = 8
+TILE_SIZE = 16
 
 
-def main(tiled_map_path):
+def convert_tilemap(tiled_map_path):
     # I have:
     # - a tileset image made out of 16x16 tiles
     #   (...where each 8x8 subtile only uses colors from a single set of 4)
@@ -105,15 +106,15 @@ def main(tiled_map_path):
     small_tile_index = 0
     # Flat list of the four little tiles that make up each big tile
     big_tile_subtiles = {}
-    for ty in range(0, height, TILE_SIZE):
-        for tx in range(0, width, TILE_SIZE):
+    for ty in range(0, height, CHAR_SIZE):
+        for tx in range(0, width, CHAR_SIZE):
             print(f"    ; tile {small_tile_index} at {tx}, {ty}")
             #seen_pixels = {}
-            big_tile_index = (ty // METATILE_SIZE) * (width // METATILE_SIZE) + (tx // METATILE_SIZE)
+            big_tile_index = (ty // TILE_SIZE) * (width // TILE_SIZE) + (tx // TILE_SIZE)
             big_tile_subtiles.setdefault(big_tile_index, []).append(small_tile_index)
-            for y in range(TILE_SIZE):
+            for y in range(CHAR_SIZE):
                 print('    dw `', end='')
-                for x in range(TILE_SIZE):
+                for x in range(CHAR_SIZE):
                     px = pixels[tx + x, ty + y]
                     #index = seen_pixels.setdefault(px, len(seen_pixels))
                     index = px % 4
@@ -140,8 +141,46 @@ def main(tiled_map_path):
             print(f"    db {subtiles[2]}, {subtiles[3]}")
 
 
-def main(image_path):
-    print("SECTION \"Image dumping test\", ROM0")
+class Char:
+    """An 8x8 tile found in a charmap."""
+    def __init__(self, image, x0, y0):
+        self.image = image
+
+        if x0 % CHAR_SIZE != 0:
+            raise ValueError(f"x0 must be a multiple of {CHAR_SIZE}; got {x0}")
+        if y0 % CHAR_SIZE != 0:
+            raise ValueError(f"y0 must be a multiple of {CHAR_SIZE}; got {y0}")
+
+        self.x0 = x0
+        self.y0 = y0
+
+    def print(self):
+        pixels = self.image.load()
+        for y in range(CHAR_SIZE):
+            print('    dw `', end='')
+            for x in range(CHAR_SIZE):
+                px = pixels[self.x0 + x, self.y0 + y]
+                # index = seen_pixels.setdefault(px, len(seen_pixels))
+                index = px % 4
+                # TODO figure out the palette this tile uses
+                print(index, end='')
+            print()
+
+
+def convert_spritesheet(image_path):
+    """Convert a spritesheet to a full set of palettes (64 bytes) followed by
+    an arbitrary number of tiles (paired such that each 8×16 object is two
+    adjacent tiles).
+    """
+
+    # TODO this should also export the following, which is tricky because they
+    # mean the leading bit isn't constant size
+    # - the number of objects per sprite
+    # - the sprite offsets, for each facing
+    # TODO where do those come from, though?  a tiled tileset, maybe?  should i
+    # be doing ALL of this through tiled, then...???  it WOULD make stuff like
+    # multiple sprites in a single sheet very convenient, but also i'd have to
+    # define all the animations by hand within tiled which isn't /great/
 
     im = PIL.Image.open(image_path)
     width, height = im.size
@@ -161,7 +200,6 @@ def main(image_path):
     # TODO?  or divisible by four?  if len(pal) != 32:
     gbc_palettes = []
     asm_colors = []
-    print("TEST_PALETTES:")
     for i in range(0, len(pal), 12):
         gbc_palette = []
         for j in range(i, i + 12, 3):
@@ -175,36 +213,36 @@ def main(image_path):
 
         gbc_palettes.append(tuple(gbc_palette))
 
+    # Pad out to a full set of 8 palettes == 32 colors
     for _ in range(len(asm_colors), 32):
         print("    dw 0")
 
     # -------------------------------------------------------------------------
 
-    print("TEST_TILES:")
-
     # TODO if two colors in different palettes are identical, Do The Right
     # Thing (vastly more complicated but worth it i think)
-    pixels = im.load()
     small_tile_index = 0
     # Flat list of the four little tiles that make up each big tile
     big_tile_subtiles = {}
-    for ty2 in range(0, height, TILE_SIZE * 2):
-        for tx in range(0, width, TILE_SIZE):
-            for ty in (ty2, ty2 + TILE_SIZE):
+    for ty2 in range(0, height, CHAR_SIZE * 2):
+        for tx in range(0, width, CHAR_SIZE):
+            for ty in (ty2, ty2 + CHAR_SIZE):
                 print(f"    ; tile {small_tile_index} at {tx}, {ty}")
                 #seen_pixels = {}
-                big_tile_index = (ty // METATILE_SIZE) * (width // METATILE_SIZE) + (tx // METATILE_SIZE)
+                big_tile_index = (ty // TILE_SIZE) * (width // TILE_SIZE) + (tx // TILE_SIZE)
                 big_tile_subtiles.setdefault(big_tile_index, []).append(small_tile_index)
-                for y in range(TILE_SIZE):
-                    print('    dw `', end='')
-                    for x in range(TILE_SIZE):
-                        px = pixels[tx + x, ty + y]
-                        #index = seen_pixels.setdefault(px, len(seen_pixels))
-                        index = px % 4
-                        # TODO track the palette this tile uses
-                        print(index, end='')
-                    print()
+                Char(im, tx, ty).print()
                 small_tile_index += 1
+
+
+def main(*argv):
+    actions = dict(spritesheet=convert_spritesheet)
+    parser = argparse.ArgumentParser(description='Convert a PNG into a set of Game Boy tiles.')
+    parser.add_argument('mode', choices=actions)
+    parser.add_argument('infile')
+    args = parser.parse_args(argv)
+
+    actions[args.mode](args.infile)
 
 
 if __name__ == '__main__':
