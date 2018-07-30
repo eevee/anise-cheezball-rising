@@ -149,6 +149,11 @@ start:
     ld a, [hl+]
     ldh [rOCPD], a
     ENDR
+    ld hl, CHEEZBALL_TEST_PALETTES
+    REPT 16
+    ld a, [hl+]
+    ldh [rOCPD], a
+    ENDR
 
     ; Define an object
     ld a, HIGH(ANISE_TEST_TILES)
@@ -254,6 +259,76 @@ start:
     ld a, %00000001
     ld [oam_buffer + 11], a
 
+    ; Put cheezball on the screen, too
+    ld hl, CHEEZBALL_TEST_TILES
+    ld a, h
+    ld [rHDMA1], a
+    ld a, l
+    ld [rHDMA2], a
+    ld a, HIGH($0000)
+    ld [rHDMA3], a
+    ld a, LOW($0000 + 3 * BYTES_PER_OBJECT)
+    ld [rHDMA4], a
+    ld a, (BYTES_PER_OBJECT * 3) / 16 - 1
+    ld [rHDMA5], a
+    ; ANTENNA
+    ld b, 96
+    ld c, 72
+    ld hl, CHEEZBALL_SPRITE_POSITIONS
+    ; x-coord
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    ld [oam_buffer + 13], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 12], a
+    ; chr index
+    ld a, 6
+    ld [oam_buffer + 14], a
+    ; attributes
+    ld a, %00000011
+    ld [oam_buffer + 15], a
+
+    ; LEFT PART
+    ; x-coord
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    ld [oam_buffer + 17], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 16], a
+    ; chr index
+    ld a, 8
+    ld [oam_buffer + 18], a
+    ; attributes
+    ld a, %00000010
+    ld [oam_buffer + 19], a
+
+    ; RIGHT PART
+    ; x-coord
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    ld [oam_buffer + 21], a
+    ; y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    ld [oam_buffer + 20], a
+    ; chr index
+    ld a, 10
+    ld [oam_buffer + 22], a
+    ; attributes
+    ld a, %00000010
+    ld [oam_buffer + 23], a
+
+
     ; Copy the DMA copy routine into HRAM
     ld de, dma_copy
     ld hl, $FF80
@@ -292,7 +367,7 @@ main:
     ld [rHDMA3], a
     ld a, LOW($0000)
     ld [rHDMA4], a
-    ld a, (32 * 3) / 16 - 1
+    ld a, (BYTES_PER_OBJECT * 3) / 16 - 1
     ld [rHDMA5], a
 
     ; END GRAPHICS STUFF
@@ -1038,6 +1113,10 @@ ANISE_SPRITE_POSITIONS:
     db -4, -20
     db -8, -14
     db 0, -14
+CHEEZBALL_SPRITE_POSITIONS:
+    db -3, -17
+    db -8, -14
+    db 0, -14
 
 
 SECTION "Important twiddles", WRAM0[$C000]
@@ -1083,6 +1162,7 @@ oam_buffer:
 
 include "tilesets/testmap.rgbasm"
 include "tilesets/testanise.rgbasm"
+include "tilesets/testcheezball.rgbasm"
 
 SECTION "Font", ROMX
 text:
