@@ -1,6 +1,8 @@
 include "inc/hardware.inc"
 
 ; Constants
+STACK_SIZE    EQU $200
+
 FACING_DOWN   EQU 0
 FACING_UP     EQU 1
 FACING_RIGHT  EQU 2
@@ -82,7 +84,8 @@ SECTION "init", ROM0[$0100]
     nop
     jp start
 
-SECTION "whatever", ROM0
+SECTION "DMA routine", ROM0
+; DMA copy routine, not used directly but copied into high RAM at startup
 dma_copy:
     ld a, $c1
     ldh [rDMA], a               ; begin transfer
@@ -94,15 +97,21 @@ dma_copy:
 dma_copy_end:
     nop
 
+; Reserved stack space
+SECTION "Stack", WRAM0[$d000 - STACK_SIZE]
+    ds STACK_SIZE
+
 ; Initialization and whatnot
 SECTION "main", ROM0[$0150]
-; DMA copy routine, not used directly but copied into high RAM at startup
 start:
     ; Enable interrupts
     ld a, IEF_VBLANK
     ldh [rIE], a
     ; This instruction enables whichever interrupts are enabled according to FFFF
     ei
+
+    ; Put the stack at the top of bank 0 of WRAM
+    ld sp, $d000
 
     ; Set LCD palette for grayscale mode; yes, it has a palette
     ld a, %01100100
