@@ -18,36 +18,70 @@ DEPS := $(foreach src,$(SOURCES),$(patsubst $(SRC)/%,$(BUILD)/%.deps,$(src)))
 
 all: $(TARGET)
 
+
+# ==============================================================================
 # Special intermediate targets
+
+# Please don't delete intermediate files, thanks
+.SECONDARY:
+
+# ------------------------------------------------------------------------------
+# Build sprite images into data files, then into objects
+# data/sprites/foo.png -> build/sprites/foo.png.rgbasm.o
+
+SPRITE_IMAGES := $(wildcard data/sprites/*.png)
+SPRITE_SOURCES := $(foreach src,$(SPRITE_IMAGES),$(patsubst data/%,$(BUILD)/%.rgbasm,$(src)))
+SPRITE_OBJECTS := $(foreach src,$(SPRITE_SOURCES),$(src).o)
+
+$(BUILD)/sprites/.keep:
+	mkdir -p $(BUILD)/sprites
+	touch $(BUILD)/sprites/.keep
+
+$(BUILD)/sprites/%.rgbasm: data/sprites/% $(BUILD)/sprites/.keep util/png-to-tiles.py
+	$(PYTHON) util/png-to-tiles.py spritesheet -o $@ $<
+$(BUILD)/sprites/%.rgbasm.o: $(BUILD)/sprites/%.rgbasm
+	$(RGBASM) -o $@ $<
+
+# ------------------------------------------------------------------------------
+# Build the font
 
 $(BUILD)/font.inc: util/font-to-tiles.py data/font.png
 	$(PYTHON) util/font-to-tiles.py data/font.png > $(BUILD)/font.inc
 
-# TODO need to mkdir /tilesets
-# FIXME if these fail, they still leave the output file intact!!
-$(BUILD)/tilesets/anise.rgbasm: util/png-to-tiles.py data/tilesets/anise.png
-	$(PYTHON) util/png-to-tiles.py spritesheet data/tilesets/anise.png > $(BUILD)/tilesets/anise.rgbasm
-$(BUILD)/tilesets/cheezball.rgbasm: util/png-to-tiles.py data/tilesets/cheezball.png
-	$(PYTHON) util/png-to-tiles.py spritesheet data/tilesets/cheezball.png > $(BUILD)/tilesets/cheezball.rgbasm
 
+# ==============================================================================
 # The regular expected stuff
 # TODO: i've manually listed targets here because otherwise, on first build,
 # rgbasm will balk that it doesn't exist, so it'll never create the deps file,
 # so make will never know it needs to be built first.  this enforces build
 # order without supplying the explicit dependency.  is there a better fix?
-$(BUILD)/%.rgbasm.o: $(SRC)/%.rgbasm | $(BUILD)/font.inc $(BUILD)/tilesets/anise.rgbasm $(BUILD)/tilesets/cheezball.rgbasm
+$(BUILD)/%.rgbasm.o: $(SRC)/%.rgbasm | $(BUILD)/font.inc
 	$(RGBASM) -i $(SRC)/ -i $(BUILD)/ -M $(BUILD)/$*.rgbasm.deps -o $@ $<
 
-$(TARGET): $(OBJECTS)
-	$(RGBLINK) -o $(TARGET) -m $(MAPFILE) -n $(SYMFILE) $(OBJECTS)
+
+# ==============================================================================
+# Finally, the game itself
+ALL_OBJECTS := $(OBJECTS) $(SPRITE_OBJECTS)
+$(TARGET): $(ALL_OBJECTS)
+	$(RGBLINK) -o $(TARGET) -m $(MAPFILE) -n $(SYMFILE) $(ALL_OBJECTS)
 	$(RGBFIX) -C -v -p 0 $(TARGET)
 
+
+# ==============================================================================
+# Special rules
+
+.PHONY: clean
 clean:
+	rm -f $(SPRITE_OBJECTS)
+	rm -f $(SPRITE_SOURCES)
+	rm -f $(BUILD)/sprites/.keep
+	rmdir $(BUILD)/sprites
 	rm -f $(OBJECTS)
 	rm -f $(DEPS)
 	rm -f $(TARGET)
 	rm -f $(MAPFILE)
 	rm -f $(SYMFILE)
+
 
 # Include generated dependency files
 # TODO: if i remove a dep, make will be unable to recreate it, but these

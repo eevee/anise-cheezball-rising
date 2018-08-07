@@ -1,4 +1,5 @@
 import argparse
+from io import StringIO
 import json
 from pathlib import Path
 import sys
@@ -154,29 +155,44 @@ class Char:
         self.x0 = x0
         self.y0 = y0
 
-    def print(self):
+    def print(self, **kwargs):
         pixels = self.image.load()
         for y in range(CHAR_SIZE):
-            print('    dw `', end='')
+            print('    dw `', end='', **kwargs)
             for x in range(CHAR_SIZE):
                 px = pixels[self.x0 + x, self.y0 + y]
                 # index = seen_pixels.setdefault(px, len(seen_pixels))
                 index = px % 4
                 # TODO figure out the palette this tile uses
-                print(index, end='')
-            print()
+                print(index, end='', **kwargs)
+            print(**kwargs)
 
 
-def convert_spritesheet(image_path):
+def convert_spritesheet(image_path, output_path):
     """Convert a spritesheet to a full set of palettes (64 bytes) followed by
     an arbitrary number of tiles (paired such that each 8×16 object is two
     adjacent tiles).
     """
 
+    name = image_path.stem
+
+    # Buffer the output, so an error doesn't produce a garbage half-file
+    if output_path:
+        out = StringIO()
+        write = lambda *a, **kw: print(*a, file=out, **kw)
+    else:
+        out = sys.stdout
+        write = print
+
+    write(f"""SECTION "Generated sprites for {name}", ROM0, ALIGN[4]""")
+    write(f"SPRITES_{name.upper()}::")
+
     # TODO this should also export the following, which is tricky because they
     # mean the leading bit isn't constant size
     # - the number of objects per sprite
     # - the sprite offsets, for each facing
+    # - the total number of frames?
+    # - the animations?????
     # TODO where do those come from, though?  a tiled tileset, maybe?  should i
     # be doing ALL of this through tiled, then...???  it WOULD make stuff like
     # multiple sprites in a single sheet very convenient, but also i'd have to
@@ -209,13 +225,13 @@ def convert_spritesheet(image_path):
             # Convert to RGB555
             asm_color = (r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10)
             asm_colors.append(asm_color)
-            print(f"    dw %{asm_color:016b}")
+            write(f"    dw %{asm_color:016b}")
 
         gbc_palettes.append(tuple(gbc_palette))
 
     # Pad out to a full set of 8 palettes == 32 colors
     for _ in range(len(asm_colors), 32):
-        print("    dw 0")
+        write("    dw 0")
 
     # -------------------------------------------------------------------------
 
@@ -227,22 +243,29 @@ def convert_spritesheet(image_path):
     for ty2 in range(0, height, CHAR_SIZE * 2):
         for tx in range(0, width, CHAR_SIZE):
             for ty in (ty2, ty2 + CHAR_SIZE):
-                print(f"    ; tile {small_tile_index} at {tx}, {ty}")
+                write(f"    ; tile {small_tile_index} at {tx}, {ty}")
                 #seen_pixels = {}
                 big_tile_index = (ty // TILE_SIZE) * (width // TILE_SIZE) + (tx // TILE_SIZE)
                 big_tile_subtiles.setdefault(big_tile_index, []).append(small_tile_index)
-                Char(im, tx, ty).print()
+                Char(im, tx, ty).print(file=out)
                 small_tile_index += 1
+
+    # Write final output
+    if output_path:
+        out.seek(0)
+        with output_path.open('w', encoding='utf8') as f:
+            f.write(out.getvalue())
 
 
 def main(*argv):
     actions = dict(spritesheet=convert_spritesheet)
     parser = argparse.ArgumentParser(description='Convert a PNG into a set of Game Boy tiles.')
+    parser.add_argument('-o', '--outfile', type=Path, default=None)
     parser.add_argument('mode', choices=actions)
     parser.add_argument('infile')
     args = parser.parse_args(argv)
 
-    actions[args.mode](args.infile)
+    actions[args.mode](Path(args.infile), output_path=args.outfile)
 
 
 if __name__ == '__main__':

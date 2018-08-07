@@ -1174,13 +1174,6 @@ oam_buffer:
 
 include "tilesets/testmap.rgbasm"
 
-SECTION "Anise sprites", ROM0, ALIGN[4]
-SPRITES_ANISE:
-    include "tilesets/anise.rgbasm"
-SECTION "Cheezball sprites", ROM0, ALIGN[4]
-SPRITES_CHEEZBALL:
-    include "tilesets/cheezball.rgbasm"
-
 SECTION "Font", ROMX
 text:
     db "The quick brown fox jumps over the     lazy dog's back.  AOOWWRRR!!!!", 0
