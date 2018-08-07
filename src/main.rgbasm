@@ -3,6 +3,8 @@ include "inc/hardware.inc"
 ; Constants
 STACK_SIZE    EQU $200
 
+MAX_ENTITIES EQU 16
+
 FACING_DOWN   EQU 0
 FACING_UP     EQU 1
 FACING_RIGHT  EQU 2
@@ -123,6 +125,16 @@ start:
     call wait_for_vblank
     ld a, LCDCF_OBJ16 | LCDCF_OBJON | LCDCF_BGON
     ldh [rLCDC], a
+
+    ; Zero-fill some important stuff
+    xor a
+    ld [entity_count], a
+    ld hl, entities_sorted_x
+    ld c, MAX_ENTITIES
+    call fill
+    ld hl, entities_sorted_y
+    ld c, MAX_ENTITIES
+    call fill
 
     ; Set a color palette.  Those aren't exposed directly in main RAM; instead,
     ; you have to write to a register, which will then write the palette to...
@@ -367,9 +379,6 @@ main:
     ; TODO there should perhaps just be a list of current tiles
     ; that need updating, and to what?  hey how does zelda deal
     ; with animated tiles, I wonder
-    ; TODO ergh, wait, this scheme means that there'll be a
-    ; single frame that you're moving in a direction before the
-    ; sprite actually changes to match.  fuckin hell
     ld hl, anise_sprites_address
     ld a, [hl+]
     ld [rHDMA1], a
@@ -398,30 +407,11 @@ main:
     bit PADB_A, a
     jp nz, .do_show_dialogue
 
-    ; OK, uh, so, what do i need here
-    ; 0. SPRITE
-    ; 1. POSE
-    ; 2. ANGLE
-    ; 3. FRAME
-    ; sprites all begin at ANISE_TEST_TILES
-    ; a pose is really a list of frames
-    ; so, anise data should include:
-    ; 
-;ANISE_SPRITES EQU ANISE_TEST_TILES
-ANISE_SPRITE_COUNT EQU 4
-ANISE_SPRITE_PARTS EQU 3
-ANISE_SPRITE_UNIQUE EQU 1
-ANISE_SPRITE_ANGLED EQU 1
-
-; update facing
-; handle movement [OK]
-; decide pose
-; update portrait
-
     ; Anise update loop
     ; TODO holding left+right simultaneously no longer produces
     ; zero, boo
     ; TODO maybe handle x/y separately and more... deliberately
+    ; TODO prevent SR40?
     xor a
     ld [anise_vx], a
     ld [anise_vy], a
@@ -1140,8 +1130,10 @@ buttons_pressed:
     db
 buttons_released:
     db
+anise_type:
+    db
 ; Position, two words per coordinate, as 12.4 fixed point.
-; This has the advantage that the high word is grid cell
+; This has the advantage that the high byte is grid cell
 anise_x:
     dw
 anise_y:
@@ -1153,13 +1145,9 @@ anise_vx:
     dw
 anise_vy:
     dw
-anise_x_range: dw
-anise_y_range: dw
 anise_facing:
     db
 anise_pose:
-    db
-anise_obj:
     db
 anise_frame:
     db
@@ -1167,6 +1155,18 @@ anise_frame_countdown:
     db
 anise_sprites_address:
     dw
+cheezball_x:
+    dw
+cheezball_y:
+    dw
+
+entity_count:
+    db
+entities_sorted_x:
+    ds MAX_ENTITIES
+entities_sorted_y:
+    ds MAX_ENTITIES
+
 
 SECTION "OAM Buffer", WRAM0[$C100]
 oam_buffer:
