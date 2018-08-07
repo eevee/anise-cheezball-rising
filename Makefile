@@ -43,6 +43,22 @@ $(BUILD)/sprites/%.rgbasm.o: $(BUILD)/sprites/%.rgbasm
 	$(RGBASM) -o $@ $<
 
 # ------------------------------------------------------------------------------
+# Build the test map into one big ol' data file
+
+MAP_MAPS := data/maps/moon.tmx.json
+MAP_SOURCES := $(foreach src,$(MAP_MAPS),$(patsubst data/%,$(BUILD)/%.rgbasm,$(src)))
+MAP_OBJECTS := $(foreach src,$(MAP_SOURCES),$(src).o)
+
+$(BUILD)/maps/.keep:
+	mkdir -p $(BUILD)/maps
+	touch $(BUILD)/maps/.keep
+
+$(BUILD)/maps/%.rgbasm: data/maps/% $(BUILD)/maps/.keep util/png-to-tiles.py
+	$(PYTHON) util/png-to-tiles.py tilemap -o $@ $<
+$(BUILD)/maps/%.rgbasm.o: $(BUILD)/maps/%.rgbasm
+	$(RGBASM) -o $@ $<
+
+# ------------------------------------------------------------------------------
 # Build the font
 
 $(BUILD)/font.inc: util/font-to-tiles.py data/font.png
@@ -61,7 +77,7 @@ $(BUILD)/%.rgbasm.o: $(SRC)/%.rgbasm | $(BUILD)/font.inc
 
 # ==============================================================================
 # Finally, the game itself
-ALL_OBJECTS := $(OBJECTS) $(SPRITE_OBJECTS)
+ALL_OBJECTS := $(SPRITE_OBJECTS) $(MAP_OBJECTS) $(OBJECTS)
 $(TARGET): $(ALL_OBJECTS)
 	$(RGBLINK) -o $(TARGET) -m $(MAPFILE) -n $(SYMFILE) $(ALL_OBJECTS)
 	$(RGBFIX) -C -v -p 0 $(TARGET)
@@ -76,6 +92,10 @@ clean:
 	rm -f $(SPRITE_SOURCES)
 	rm -f $(BUILD)/sprites/.keep
 	rmdir $(BUILD)/sprites
+	rm -f $(MAP_OBJECTS)
+	rm -f $(MAP_SOURCES)
+	rm -f $(BUILD)/maps/.keep
+	rmdir $(BUILD)/maps
 	rm -f $(OBJECTS)
 	rm -f $(DEPS)
 	rm -f $(TARGET)

@@ -134,7 +134,7 @@ start:
     ld a, %10000000
     ld [rBCPS], a
 
-    ld hl, TEST_PALETTES
+    ld hl, MAP_TEST_PALETTES
     REPT 8
     ld a, [hl+]
     ld [rBCPD], a
@@ -142,14 +142,14 @@ start:
 
     ; Load some basic tiles
     ld hl, $9000
-    ld de, TEST_TILES
+    ld de, MAP_TEST_CHARS
     ld bc, 1600
     call copy16
 
     ; Read from the test map
     ; TODO good candidate for DMA...?  or maybe not since i should really only be filling the visible screen area
     ld hl, $9800
-    ld de, TEST_MAP_1
+    ld de, MAP_TEST_DATA
     ld bc, 1024
     call copy16
 
@@ -971,7 +971,7 @@ get_cell_flags:
     push hl
     push de
     ; Get the cell first
-    ld hl, TEST_MAP_1
+    ld hl, MAP_TEST_DATA
     ; Add x coordinate
     ld d, 0
     ld e, b
@@ -1171,8 +1171,6 @@ anise_sprites_address:
 SECTION "OAM Buffer", WRAM0[$C100]
 oam_buffer:
     ds 4 * 40
-
-include "tilesets/testmap.rgbasm"
 
 SECTION "Font", ROMX
 text:

@@ -22,7 +22,13 @@ def convert_tilemap(tiled_map_path):
     # - Blocks of the tiles that make up a map
     # - Blocks of the attributes for those tiles
 
-    print("SECTION \"Map dumping test\", ROM0")
+    # TODO this is going to need to be split into multiple steps: dump the
+    # tilesets to both rgbasm and data files, then dump the map
+    # TODO hmmmm the map should really dump into tiles, not chars.  but how do
+    # i identify them?  there could be arbitrarily many (i.e. >256!) and they
+    # might come from any tileset.
+
+    print("SECTION \"Map dumping test\", ROMX")
 
     tiled_map_path = Path(tiled_map_path)
     with tiled_map_path.open() as f:
@@ -80,7 +86,7 @@ def convert_tilemap(tiled_map_path):
     # TODO?  or divisible by four?  if len(pal) != 32:
     gbc_palettes = []
     asm_colors = []
-    print("TEST_PALETTES:")
+    print("MAP_TEST_PALETTES::")
     for i in range(0, len(pal), 12):
         gbc_palette = []
         for j in range(i, i + 12, 3):
@@ -99,7 +105,7 @@ def convert_tilemap(tiled_map_path):
 
     # -------------------------------------------------------------------------
 
-    print("TEST_TILES:")
+    print("MAP_TEST_CHARS::")
 
     # TODO if two colors in different palettes are identical, Do The Right
     # Thing (vastly more complicated but worth it i think)
@@ -126,7 +132,7 @@ def convert_tilemap(tiled_map_path):
 
     # -------------------------------------------------------------------------
 
-    print("TEST_MAP_1:")
+    print("MAP_TEST_DATA::")
     t0 = map_tileset['firstgid']
     layer_data = map_layer['data']
     layer_width = map_layer['width']
@@ -168,7 +174,7 @@ class Char:
             print(**kwargs)
 
 
-def convert_spritesheet(image_path, output_path):
+def convert_spritesheet(image_path):
     """Convert a spritesheet to a full set of palettes (64 bytes) followed by
     an arbitrary number of tiles (paired such that each 8×16 object is two
     adjacent tiles).
@@ -176,16 +182,8 @@ def convert_spritesheet(image_path, output_path):
 
     name = image_path.stem
 
-    # Buffer the output, so an error doesn't produce a garbage half-file
-    if output_path:
-        out = StringIO()
-        write = lambda *a, **kw: print(*a, file=out, **kw)
-    else:
-        out = sys.stdout
-        write = print
-
-    write(f"""SECTION "Generated sprites for {name}", ROM0, ALIGN[4]""")
-    write(f"SPRITES_{name.upper()}::")
+    print(f"""SECTION "Generated sprites for {name}", ROM0, ALIGN[4]""")
+    print(f"SPRITES_{name.upper()}::")
 
     # TODO this should also export the following, which is tricky because they
     # mean the leading bit isn't constant size
@@ -225,13 +223,13 @@ def convert_spritesheet(image_path, output_path):
             # Convert to RGB555
             asm_color = (r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10)
             asm_colors.append(asm_color)
-            write(f"    dw %{asm_color:016b}")
+            print(f"    dw %{asm_color:016b}")
 
         gbc_palettes.append(tuple(gbc_palette))
 
     # Pad out to a full set of 8 palettes == 32 colors
     for _ in range(len(asm_colors), 32):
-        write("    dw 0")
+        print("    dw 0")
 
     # -------------------------------------------------------------------------
 
@@ -243,29 +241,44 @@ def convert_spritesheet(image_path, output_path):
     for ty2 in range(0, height, CHAR_SIZE * 2):
         for tx in range(0, width, CHAR_SIZE):
             for ty in (ty2, ty2 + CHAR_SIZE):
-                write(f"    ; tile {small_tile_index} at {tx}, {ty}")
+                print(f"    ; tile {small_tile_index} at {tx}, {ty}")
                 #seen_pixels = {}
                 big_tile_index = (ty // TILE_SIZE) * (width // TILE_SIZE) + (tx // TILE_SIZE)
                 big_tile_subtiles.setdefault(big_tile_index, []).append(small_tile_index)
-                Char(im, tx, ty).print(file=out)
+                Char(im, tx, ty).print()
                 small_tile_index += 1
-
-    # Write final output
-    if output_path:
-        out.seek(0)
-        with output_path.open('w', encoding='utf8') as f:
-            f.write(out.getvalue())
 
 
 def main(*argv):
-    actions = dict(spritesheet=convert_spritesheet)
+    actions = dict(
+        spritesheet=convert_spritesheet,
+        tilemap=convert_tilemap,
+    )
     parser = argparse.ArgumentParser(description='Convert a PNG into a set of Game Boy tiles.')
     parser.add_argument('-o', '--outfile', type=Path, default=None)
     parser.add_argument('mode', choices=actions)
     parser.add_argument('infile')
     args = parser.parse_args(argv)
 
-    actions[args.mode](Path(args.infile), output_path=args.outfile)
+    # Handle the output file here, so the functions above can just print()
+    real_stdout = sys.stdout
+    try:
+        # Buffer output in memory, so that if something goes wrong, we don't
+        # create an empty file that make later thinks means a success
+        if args.outfile:
+            buf = StringIO()
+            sys.stdout = buf
+
+        actions[args.mode](Path(args.infile))
+
+        if args.outfile:
+            buf.seek(0)
+            with args.outfile.open('w', encoding='utf8') as f:
+                f.write(buf.getvalue())
+
+    except BaseException:
+        sys.stdout = real_stdout
+        raise
 
 
 if __name__ == '__main__':
