@@ -1,4 +1,5 @@
 include "inc/hardware.inc"
+include "inc/math.rgbasm"
 
 ; Constants
 STACK_SIZE    EQU $200
@@ -462,64 +463,6 @@ main:
     ; 3. Ignore anything we're already overlapping.
     ; FIXME this does not handle going OFF the map correctly,
     ; but oh well for now
-
-; Add an 8-bit register to a 16-bit register, in place.
-; No clever tricks, just the six ops you'd expect.
-; ex: Add8To16 bc, d
-Add8To16: MACRO
-    ld a, LOW(\1)
-    add a, \2
-    ld LOW(\1), a
-    ld a, HIGH(\1)
-    adc a, 0
-    ld HIGH(\1), a
-ENDM
-
-AddATo16: MACRO
-    add a, LOW(\1)
-    ld LOW(\1), a
-    jr nc, .no_carry\@
-    inc HIGH(\1)
-.no_carry\@:
-ENDM
-
-; Subtract an 8-bit register from a 16-bit register, in place.
-; No clever tricks, just the six ops you'd expect.
-; ex: Sub8From16 bc, d
-Sub8From16: MACRO
-    ld a, LOW(\1)
-    sub a, \2
-    ld LOW(\1), a
-    ld a, HIGH(\1)
-    sbc a, 0
-    ld HIGH(\1), a
-ENDM
-
-SubAFrom16: MACRO
-    ; Compute a - LOW instead, and invert the result
-    sub a, LOW(\1)
-    cpl
-    inc a
-    ld LOW(\1), a
-    ; Borrow from HIGH only if a > LOW
-    jr c, .no_borrow\@
-    jr z, .no_borrow\@
-    dec HIGH(\1)
-.no_borrow\@:
-    ; TODO should i deal with flags here...?  caller could
-    ; probably figure out over/underflow themselves if
-    ; desired...
-ENDM
-
-
-Compare16: MACRO
-    ld a, HIGH(\1)
-    cp a, HIGH(\2)
-    jr nz, .not_equal_high\@
-    ld a, LOW(\1)
-    cp a, LOW(\2)
-.not_equal_high\@:
-ENDM
 
 ; TODO put this in its own file; make notes about what
 ; "inclusive" and "exclusive" mean
