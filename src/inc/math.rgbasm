@@ -1,5 +1,17 @@
 ; Various math macros, for ease of reading math-heavy code.
 
+; Negates a 16-bit register.
+; Trashes 'a'.
+; ex: Negate16 de
+Negate16: MACRO
+    xor a
+    sub a, LOW(\1)
+    ld LOW(\1), a
+    sbc a, a
+    sub a, HIGH(\1)
+    ld HIGH(\1), a
+ENDM
+
 ; Add an 8-bit register to a 16-bit register, in place.
 ; No clever tricks, just the six ops you'd expect.
 ; Trashes 'a'.  DO NOT use with 'a'.

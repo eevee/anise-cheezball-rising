@@ -473,6 +473,7 @@ main:
 ; \1 = axis (0 = x, 1 = y)
 ; \2 = sign (0 = up/left/negative, 1 = down/right/positive)
 ; \3 = label to jump to when done with this axis
+; Expects the current position to already be in bc.
 CheckCollision: MACRO
 _is_x = (\1 == 0)
 _is_y = (\1 == 1)
@@ -490,31 +491,60 @@ _p_vel EQUS "anise_vy"
 _q_vel EQUS "anise_vx"
 ENDC
 
-    ; bc is current position; compute leading edge
-    ld hl, ANISE_RADIUS
-IF _is_pos
-    ld a, c
-    add a, [hl]
-    ld e, a
-    ld a, b
-    adc a, 0  ; TODO jr + inc might be faster
-    ld d, a
-ELSE
-    ld a, c
-    sub a, [hl]
-    ld e, a
-    ld a, b
-    sbc a, 0  ; TODO jr + dec might be faster
-    ld d, a
-ENDC
-    ; de is now leading edge
+    ; In the following comments:
+    ; 'p' is our position along the movement (main) axis
+    ; 'r' is the radius
+    ; 'Δp' is the movement
+    ; 'q' is our position along the perpendicular axis
+    ; 'P', 'Q', and 'R' are the corresponding values for an
+    ;   entity we may collide with
+    ; Also, the pseudofunctions Inc() and Exc() refer to the
+    ; tile containing a given point.  The only difference is
+    ; when the point lies exactly on a grid line, in which case
+    ; the right answer depends on whether the point is from the
+    ; top/left edge of a box or the bottom/right.
+    ; Points on the bottom/right edge of a box are considered
+    ; exclusive bounds, so that an entity can press right up
+    ; against a wall (entity's right edge = 32, wall's left edge
+    ; = 32) and not be considered to be overlapping it.
+    ; Inc() is just the high byte of a 12.4 position.  Exc() is
+    ; the high byte after subtracting the minimum possible
+    ; motion, which is $000.1.
 
-    ; Make a list of entities we /might/ encounter.
-    ; Currently, the only candidate is Cheezball, so.
+    ; The general idea is to find all the things we might hit,
+    ; put them in order, then see which one blocks us first.
+    ; There are two kinds of things we might hit: entities, and
+    ; map cells.  Map cells are pretty easy, but entities take a
+    ; bit more work, so we need to find the entities first.
+
+    ; So!  Make a list of entities we could collide with.
     xor a
     ld [entities_collidable_count], a
 
-    ; TODO oh incredibly please document what is happening here
+    ; Consider the following, where the square on the left is
+    ; trying to move to the dotted outline:
+    ;
+    ;      p  |-Δp-|
+    ;   +-----+....*
+    ;   |     |    :
+    ;   |     |    :
+    ;   |     |  +-÷--+
+    ;   +-----+..|.*  |
+    ;            |    |
+    ;            +----+
+    ;
+    ; A useful fact is that two AABBs, defined by center and
+    ; radius, overlap (along one axis) if the absolute distance
+    ; between their centers is less than the sum of their radii.
+    ; (This definition avoids the inclusive/exclusive problem,
+    ; since touching always means one edge is top/left and one
+    ; is bottom/right.)
+    ; TODO obvious early check: are we even moving towards it?
+    ; You can see from the diagram that we only care about an
+    ; entity if it ALREADY overlaps us along the PERPENDICULAR
+    ; axis — otherwise, moving towards it would miss it
+    ; completely.  In other words, this must be true:
+    ;   |q - Q| < r + R
     ; TODO is any faster check feasible?
     ; TODO also, what happens if dx is odd?
     ; TODO also also, is it possible to unit test this stuff
@@ -523,6 +553,7 @@ ENDC
     ld b, a
     ld a, [_q_pos + 1]
     ld c, a
+    ; bc = q
 IF _is_x
     ld hl, cheezball_y + 1
 ELSE
@@ -534,25 +565,34 @@ ENDC
     ld a, [hl]
     sbc a, b
     ld d, a
-    ; de = cy - y
+    ; de = Q - q
     jr nc, .skip_abs\@
-    xor a
-    sub a, e
-    ld e, a
-    sbc a, a
-    sub a, d
-    ld d, a
+    Negate16 de
 .skip_abs\@:
-    ; de = |cy - y|
+    ; de = |Q - q|
     ld hl, ANISE_RADIUS
     ld b, 0
     ld c, [hl]
     ld hl, CHEEZBALL_RADIUS
     Add8To16 bc, [hl]
-    ; bc = r + s
+    ; bc = r + R
     Compare16 de, bc
+    ; If de >= bc, they're completely misaligned on the q axis,
+    ; and it's impossible to collide with this entity
     jr nc, .skip_cheezball\@
 
+    ; Checking for a collision along the main axis is slightly
+    ; trickier.  Collisions shouldn't fire for entities that
+    ; already overlap, so we want to check whether ONLY the
+    ; dotted part (the area we're moving over/into) would
+    ; overlap.  A little doodling reveals that the dotted box
+    ; has a center at p ± r + ½Δp, and its radius is ½Δp.
+    ; (The ± should have the same sign as Δp.)  Thus, the
+    ; following must be true:
+    ;   |p ± r + ½Δp - P| < ½Δp + S
+    ; TODO should we still run, like, collision handlers for
+    ; overlapping entities?  (but then they would run twice.
+    ; but also that's not wrong.  hm.)
     ld b, 0
     ld a, [_p_vel]
 IF _is_neg
@@ -596,19 +636,18 @@ ENDC
     ld a, [hl]
     sbc a, d
     ld d, a
+    ; TODO shouldn't i /know/ whether i need this?  can't i
+    ; avoid it by just reversing the subtraction if necessary?
     jr nc, .skip_abs2\@
-    xor a
-    sub a, e
-    ld e, a
-    sbc a, a
-    sub a, d
-    ld d, a
+    Negate16 de
 .skip_abs2\@:
     ; de = |cx - (x + r + dx/2)|
-    Compare16 bc, de
-    jr c, .skip_cheezball\@
+    Compare16 de, bc
+    jr nc, .skip_cheezball\@
 
-    ; Looks good!  Store it
+    ; We will definitely hit this entity!  Add it to the list,
+    ; along with the edge that we're going to hit, so we can
+    ; sort it in collision order later.
     ld b, [hl]
     inc hl
     ld c, [hl]
@@ -632,27 +671,9 @@ ENDC
     xor a
     ldh [h_collision_index], a
 
-
+    ; Now, for the grid.
 
     ld hl, ANISE_RADIUS
-    ; In the following equations:
-    ; 'p' is the current position along the movement axis
-    ; 'r' is the radius
-    ; 'Δp' is the movement
-    ; 'q' is the current position along the other axis
-    ; Also, the pseudofunctions Inc() and Exc() refer to the
-    ; tile containing a given point.  The only difference is
-    ; when the point lies exactly on a grid line, in which case
-    ; the right answer depends on whether the point is from the
-    ; top/left edge of a box or the bottom/right.
-    ; Points on the bottom/right edge of a box are considered
-    ; exclusive bounds, so that an entity can press right up
-    ; against a wall (entity's right edge = 32, wall's left edge
-    ; = 32) and not be considered to be overlapping it.
-    ; Inc() is just the high byte of a 12.4 position.  Exc() is
-    ; the high byte after subtracting the minimum possible
-    ; motion, which is $000.1.
-
     ; First, figure out which 'columns' to check along the
     ; p-axis.  (For y motion, these are actually rows.)  The
     ; nearest column that might possibly be relevant is the next
