@@ -103,6 +103,15 @@ dma_copy_end:
 SECTION "Stack", WRAM0[$d000 - STACK_SIZE]
     ds STACK_SIZE
 
+SECTION "High locals", HRAM
+h_dma:
+    ds dma_copy_end - dma_copy
+h_collision_index:
+    db
+h_our_radius:
+    db
+
+
 ; Initialization and whatnot
 SECTION "main", ROM0[$0150]
 start:
@@ -129,11 +138,11 @@ start:
     ; Zero-fill some important stuff
     xor a
     ld [entity_count], a
-    ld hl, entities_sorted_x
-    ld c, MAX_ENTITIES
+    ld hl, entities_sorted_x_pos
+    ld c, MAX_ENTITIES * 3
     call fill
-    ld hl, entities_sorted_y
-    ld c, MAX_ENTITIES
+    ld hl, entities_sorted_y_pos
+    ld c, MAX_ENTITIES * 3
     call fill
 
     ; Set a color palette.  Those aren't exposed directly in main RAM; instead,
@@ -283,6 +292,16 @@ start:
     ld a, %00000001
     ld [oam_buffer + 11], a
 
+    ; Place Cheezball at 96, 72
+    ld a, 96 >> 4
+    ld [cheezball_x], a
+    ld a, (96 & $0f) << 4
+    ld [cheezball_x + 1], a
+    ld a, 72 >> 4
+    ld [cheezball_y], a
+    ld a, (72 & $0f) << 4
+    ld [cheezball_y + 1], a
+
     ; Put cheezball on the screen, too
     ld hl, SPRITES_CHEEZBALL + SPRITESO_TILES
     ld a, h
@@ -355,7 +374,7 @@ start:
 
     ; Copy the DMA copy routine into HRAM
     ld de, dma_copy
-    ld hl, $FF80
+    ld hl, h_dma
     ld c, dma_copy_end - dma_copy
     call copy
 
@@ -371,7 +390,7 @@ main:
     ; that time!
 
     ; Use DMA to copy our OAM buffer into real OAM
-    call $FF80
+    call h_dma
 
     ; Update Anise's current sprite.  Use DMA here because...
     ; well, geez, it's too slow otherwise.
@@ -456,9 +475,17 @@ Add8To16: MACRO
     ld HIGH(\1), a
 ENDM
 
+AddATo16: MACRO
+    add a, LOW(\1)
+    ld LOW(\1), a
+    jr nc, .no_carry\@
+    inc HIGH(\1)
+.no_carry\@:
+ENDM
+
 ; Subtract an 8-bit register from a 16-bit register, in place.
 ; No clever tricks, just the six ops you'd expect.
-; ex: Sub8To16 bc, d
+; ex: Sub8From16 bc, d
 Sub8From16: MACRO
     ld a, LOW(\1)
     sub a, \2
@@ -466,6 +493,32 @@ Sub8From16: MACRO
     ld a, HIGH(\1)
     sbc a, 0
     ld HIGH(\1), a
+ENDM
+
+SubAFrom16: MACRO
+    ; Compute a - LOW instead, and invert the result
+    sub a, LOW(\1)
+    cpl
+    inc a
+    ld LOW(\1), a
+    ; Borrow from HIGH only if a > LOW
+    jr c, .no_borrow\@
+    jr z, .no_borrow\@
+    dec HIGH(\1)
+.no_borrow\@:
+    ; TODO should i deal with flags here...?  caller could
+    ; probably figure out over/underflow themselves if
+    ; desired...
+ENDM
+
+
+Compare16: MACRO
+    ld a, HIGH(\1)
+    cp a, HIGH(\2)
+    jr nz, .not_equal_high\@
+    ld a, LOW(\1)
+    cp a, LOW(\2)
+.not_equal_high\@:
 ENDM
 
 ; TODO put this in its own file; make notes about what
@@ -493,6 +546,150 @@ _q_pos EQUS "anise_x"
 _p_vel EQUS "anise_vy"
 _q_vel EQUS "anise_vx"
 ENDC
+
+    ; bc is current position; compute leading edge
+    ld hl, ANISE_RADIUS
+IF _is_pos
+    ld a, c
+    add a, [hl]
+    ld e, a
+    ld a, b
+    adc a, 0  ; TODO jr + inc might be faster
+    ld d, a
+ELSE
+    ld a, c
+    sub a, [hl]
+    ld e, a
+    ld a, b
+    sbc a, 0  ; TODO jr + dec might be faster
+    ld d, a
+ENDC
+    ; de is now leading edge
+
+    ; Make a list of entities we /might/ encounter.
+    ; Currently, the only candidate is Cheezball, so.
+    xor a
+    ld [entities_collidable_count], a
+
+    ; TODO oh incredibly please document what is happening here
+    ; TODO is any faster check feasible?
+    ; TODO also, what happens if dx is odd?
+    ; TODO also also, is it possible to unit test this stuff
+    push bc
+    ld a, [_q_pos]
+    ld b, a
+    ld a, [_q_pos + 1]
+    ld c, a
+IF _is_x
+    ld hl, cheezball_y + 1
+ELSE
+    ld hl, cheezball_x + 1
+ENDC
+    ld a, [hl-]
+    sub a, c
+    ld e, a
+    ld a, [hl]
+    sbc a, b
+    ld d, a
+    ; de = cy - y
+    jr nc, .skip_abs\@
+    xor a
+    sub a, e
+    ld e, a
+    sbc a, a
+    sub a, d
+    ld d, a
+.skip_abs\@:
+    ; de = |cy - y|
+    ld hl, ANISE_RADIUS
+    ld b, 0
+    ld c, [hl]
+    ld hl, CHEEZBALL_RADIUS
+    Add8To16 bc, [hl]
+    ; bc = r + s
+    Compare16 de, bc
+    jr nc, .skip_cheezball\@
+
+    ld b, 0
+    ld a, [_p_vel]
+IF _is_neg
+    cpl
+    inc a
+ENDC
+    srl a  ; a = dx/2
+    ld c, a
+    ld hl, CHEEZBALL_RADIUS
+    Add8To16 bc, [hl]
+    ; bc = s + dx/2
+    ld hl, _p_pos
+    ld d, [hl]
+    inc hl
+    ld e, [hl]
+    ; de = x
+    ld a, [_p_vel]
+IF _is_neg
+    cpl
+    inc a
+ENDC
+    srl a  ; a = dx/2
+    AddATo16 de
+    ; de = x + dx/2
+    ld a, [ANISE_RADIUS]
+IF _is_pos
+    AddATo16 de
+ELSE
+    SubAFrom16 de
+ENDC
+    ; de = x + r + dx/2
+    ; Find absolute difference of de and cx
+IF _is_x
+    ld hl, cheezball_x + 1
+ELSE
+    ld hl, cheezball_y + 1
+ENDC
+    ld a, [hl-]
+    sub a, e
+    ld e, a
+    ld a, [hl]
+    sbc a, d
+    ld d, a
+    jr nc, .skip_abs2\@
+    xor a
+    sub a, e
+    ld e, a
+    sbc a, a
+    sub a, d
+    ld d, a
+.skip_abs2\@:
+    ; de = |cx - (x + r + dx/2)|
+    Compare16 bc, de
+    jr c, .skip_cheezball\@
+
+    ; Looks good!  Store it
+    ld b, [hl]
+    inc hl
+    ld c, [hl]
+    ld hl, CHEEZBALL_RADIUS
+IF _is_pos
+    Sub8From16 bc, [hl]
+ELSE
+    Add8To16 bc, [hl]
+ENDC
+    ld hl, entities_collidable + 1
+    ld [hl], b
+    inc hl
+    ld [hl], c
+
+    ld a, 1
+    ld [entities_collidable_count], a
+
+.skip_cheezball\@:
+    pop bc
+
+    xor a
+    ldh [h_collision_index], a
+
+
 
     ld hl, ANISE_RADIUS
     ; In the following equations:
@@ -592,10 +789,17 @@ ENDC
     sbc a, 0
     ld b, a                     ; b = Inc(q - r)
 
+    ld a, [hl]
+    ldh [h_our_radius], a
+
 .main_scan\@:
     ; Column scan may run multiple times, so preserve the
     ; initial state of b/c
     push bc
+
+    ; TODO here check for any collision candidates that are up
+    ; to this next grid line (or maybe just before it, if that's
+    ; easier, idk)
 
 .perpendicular_scan\@:
     ; Fetch flags for this cell
@@ -668,6 +872,48 @@ ENDC
     jr nc, .main_scan\@
 
 .no_hits\@:
+    ; Check for running into cheezball
+    ld a, [h_collision_index]
+    push hl
+    ld hl, entities_collidable_count
+    cp a, [hl]
+    jr nc, .skip_entity_check\@
+    ; OK, haven't hit the end of the entity list yet...
+    ld hl, entities_collidable + 1
+    ; TODO compute actual index, or hell just use a pointer with
+    ; a sentinel at the end
+    ; TODO this is meant to compare to our current grid line but
+    ; it doesn't really apply once we get to this point
+    ;ld a, c
+    ;cp a, [hl]
+    ; TODO varies with direction Auughhh
+    ;jr nz, .skip_entity_check\@
+
+    ; TODO check...  more...  thoroughly......  i guess?
+    ; We're blocked, so, set our position to be the thing we
+    ; hit, minus its radius, minus OUR radius
+    ld b, [hl]
+    inc hl
+    ld c, [hl]
+    ldh a, [h_our_radius]
+IF _is_pos
+    SubAFrom16 bc
+ELSE
+    AddATo16 bc
+ENDC
+
+    ld a, b
+    ld [_p_pos], a
+    ld a, c
+    ld [_p_pos + 1], a
+    pop hl
+    pop bc
+    jp \3
+
+.skip_entity_check\@:
+    pop hl
+
+
     ; Done, and we never hit anything!  Update our position to
     ; what was requested
     ld a, [_p_vel]
@@ -1097,7 +1343,7 @@ ANISE_ACTOR_INFO:
     ; Walk pose
     db 0, 4
 ANISE_RADIUS:
-    db 3 << 4
+    db 4 << 4
 ANISE_SPRITE_POSITIONS:
     ; down
     db -2, -20
@@ -1115,6 +1361,8 @@ ANISE_SPRITE_POSITIONS:
     db -4, -20
     db -8, -14
     db 0, -14
+CHEEZBALL_RADIUS:
+    db 4 << 4
 CHEEZBALL_SPRITE_POSITIONS:
     db -3, -17
     db -8, -14
@@ -1162,11 +1410,14 @@ cheezball_y:
 
 entity_count:
     db
-entities_sorted_x:
-    ds MAX_ENTITIES
-entities_sorted_y:
-    ds MAX_ENTITIES
-
+entities_sorted_x_pos:
+    ds MAX_ENTITIES * 3
+entities_sorted_y_pos:
+    ds MAX_ENTITIES * 3
+entities_collidable_count:
+    db
+entities_collidable:
+    ds MAX_ENTITIES * 3
 
 SECTION "OAM Buffer", WRAM0[$C100]
 oam_buffer:
