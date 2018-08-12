@@ -593,38 +593,41 @@ ENDC
     ; TODO should we still run, like, collision handlers for
     ; overlapping entities?  (but then they would run twice.
     ; but also that's not wrong.  hm.)
+    ; TODO the ½Δp can be eliminated if we can get rid of the
+    ; absolute value, which we CAN do in an earlier pass because
+    ; we know which way we're moving...
     ld b, 0
     ld a, [_p_vel]
 IF _is_neg
     cpl
     inc a
 ENDC
-    srl a  ; a = dx/2
+    srl a  ; a = ½Δp
     ld c, a
     ld hl, CHEEZBALL_RADIUS
     Add8To16 bc, [hl]
-    ; bc = s + dx/2
+    ; bc = R + ½Δp
     ld hl, _p_pos
     ld d, [hl]
     inc hl
     ld e, [hl]
-    ; de = x
+    ; de = p
     ld a, [_p_vel]
 IF _is_neg
     cpl
     inc a
 ENDC
-    srl a  ; a = dx/2
+    srl a  ; a = ½Δp
     AddATo16 de
-    ; de = x + dx/2
+    ; de = p + ½Δp
     ld a, [ANISE_RADIUS]
 IF _is_pos
     AddATo16 de
 ELSE
     SubAFrom16 de
 ENDC
-    ; de = x + r + dx/2
-    ; Find absolute difference of de and cx
+    ; de = p ± r + ½Δp
+    ; Find absolute difference of de and P
 IF _is_x
     ld hl, cheezball_x + 1
 ELSE
@@ -641,9 +644,9 @@ ENDC
     jr nc, .skip_abs2\@
     Negate16 de
 .skip_abs2\@:
-    ; de = |cx - (x + r + dx/2)|
-    Compare16 de, bc
-    jr nc, .skip_cheezball\@
+    ; de = |P - (p ± r + ½Δp)|
+    Compare16 bc, de
+    jr c, .skip_cheezball\@
 
     ; We will definitely hit this entity!  Add it to the list,
     ; along with the edge that we're going to hit, so we can
@@ -672,7 +675,6 @@ ENDC
     ldh [h_collision_index], a
 
     ; Now, for the grid.
-
     ld hl, ANISE_RADIUS
     ; First, figure out which 'columns' to check along the
     ; p-axis.  (For y motion, these are actually rows.)  The
