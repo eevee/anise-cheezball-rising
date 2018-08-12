@@ -5,8 +5,6 @@ include "inc/math.rgbasm"
 ; Constants
 STACK_SIZE    EQU $200
 
-MAX_ENTITIES EQU 16
-
 BYTES_PER_TILE EQU 16
 BYTES_PER_OBJECT EQU 32
 
@@ -78,8 +76,15 @@ ENDM
 ; Control starts here, but there's more ROM header several bytes later, so the
 ; only thing we can really do is immediately jump to after the header
 SECTION "init", ROM0[$0100]
+_begin_init:
     nop
     jp start
+_end_init:
+    ; Fill the rest of the header space with NOPs so the linker
+    ; doesn't try to put anything else here (eek!)
+    REPT $0150 - $0100 - (_end_init - _begin_init)
+    nop
+    ENDR
 
 SECTION "DMA routine", ROM0
 ; DMA copy routine, not used directly but copied into high RAM at startup
@@ -253,14 +258,10 @@ start:
     ld [oam_buffer + 11], a
 
     ; Place Cheezball at 96, 72
-    ld a, 96 >> 4
-    ld [cheezball_x], a
-    ld a, (96 & $0f) << 4
-    ld [cheezball_x + 1], a
-    ld a, 72 >> 4
-    ld [cheezball_y], a
-    ld a, (72 & $0f) << 4
-    ld [cheezball_y + 1], a
+    ld a, 1
+    ld bc, 96 << 4
+    ld de, 72 << 4
+    call spawn_entity
 
     ; Put cheezball on the screen, too
     ld hl, SPRITES_CHEEZBALL + SPRITESO_TILES
@@ -514,9 +515,9 @@ ENDC
     ld c, a
     ; bc = q
 IF _is_x
-    ld hl, cheezball_y + 1
+    ld hl, cheezball + Entity_y + 1
 ELSE
-    ld hl, cheezball_x + 1
+    ld hl, cheezball + Entity_x + 1
 ENDC
     ld a, [hl-]
     sub a, c
@@ -588,9 +589,9 @@ ENDC
     ; de = p ± r + ½Δp
     ; Find absolute difference of de and P
 IF _is_x
-    ld hl, cheezball_x + 1
+    ld hl, cheezball + Entity_x + 1
 ELSE
-    ld hl, cheezball_y + 1
+    ld hl, cheezball + Entity_y + 1
 ENDC
     ld a, [hl-]
     sub a, e
@@ -1281,19 +1282,10 @@ buttons_pressed:
     db
 buttons_released:
     db
-anise::
-    ds sizeof_Entity
 ; TODO replace this with a general sprite update queue
 anise_sprites_address:
     dw
-; TODO expand me into a real entity
-cheezball_x:
-    dw
-cheezball_y:
-    dw
 
-entity_count:
-    db
 entities_sorted_x_pos:
     ds MAX_ENTITIES * 3
 entities_sorted_y_pos:

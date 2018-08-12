@@ -1,5 +1,7 @@
 include "inc/vendor/structs.rgbasm"
 
+MAX_ENTITIES EQU 16
+
 FACING_DOWN   EQU 0
 FACING_UP     EQU 1
 FACING_RIGHT  EQU 2

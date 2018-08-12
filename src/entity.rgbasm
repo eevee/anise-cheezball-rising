@@ -1,5 +1,16 @@
 include "inc/types/entity.rgbasm"
 
+SECTION "Entity data", WRAM0
+
+entity_count::
+    db
+entities::
+    ; TODO should i round this up to a power of two?
+    ;ds sizeof_Entity * MAX_ENTITIES
+anise::
+    ds sizeof_Entity
+cheezball::
+    ds sizeof_Entity * (MAX_ENTITIES)
 
 SECTION "Entity code", ROM0
 
@@ -9,9 +20,29 @@ SECTION "Entity code", ROM0
 ; Entity struct.
 spawn_entity::
     ; TODO this obviously does not actually work yet; it should
-    ; find an empty slot, maybe have a way to return an error,
-    ; etc.
-    ld hl, anise
+    ; find an empty slot, maybe have a way to return an error if
+    ; there isn't one, etc.  or maybe some entities are
+    ; low-priority (e.g. effects) and can be nuked?
+    ld hl, entity_count
+    ld a, [hl]
+    inc [hl]
+    ld hl, entities
+    ; TODO maybe i should have a "multiply onto hl" function
+    ; TODO this is probably suboptimal since sizeof_Entity is
+    ; small enough to fit in one byte?  also it's constant
+    or a, a
+    jr z, .skip_stride_entity
+    push bc
+    ld bc, sizeof_Entity
+.stride_entity:
+    add hl, bc
+    dec a
+    jr nz, .stride_entity
+    pop bc
+.skip_stride_entity:
+
+    ; hl = new entity
+    push hl             ; to restore once we're done
     ; Type
     ld [hl+], a
     ; Position
@@ -41,7 +72,7 @@ spawn_entity::
     ld a, ANIMATION_LENGTH
     ld [hl+], a
 
-    ld hl, anise
+    pop hl
     ret
 
 
