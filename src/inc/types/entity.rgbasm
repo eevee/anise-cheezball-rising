@@ -1,0 +1,29 @@
+include "inc/vendor/structs.rgbasm"
+
+FACING_DOWN   EQU 0
+FACING_UP     EQU 1
+FACING_RIGHT  EQU 2
+FACING_LEFT   EQU 3
+
+ANIMATION_LENGTH EQU 5
+
+    struct EntityType
+    bytes 1, radius
+    end_struct
+
+    struct Entity
+    bytes 1, type
+    ; Position in pixels as 12.4 fixed point.
+    ; This has the advantage that the high byte is the cell.
+    words 1, x
+    words 1, y
+    ; Velocity in pixels per tic
+    ; TODO is this 3.4 or 11.4?
+    words 1, vx
+    words 1, vy
+    ; One of the above FACING constants.
+    bytes 1, facing
+    bytes 1, pose
+    bytes 1, frame
+    bytes 1, countdown
+    end_struct

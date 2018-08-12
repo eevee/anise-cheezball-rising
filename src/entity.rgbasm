@@ -1,0 +1,78 @@
+include "inc/types/entity.rgbasm"
+
+
+SECTION "Entity code", ROM0
+
+; Spawn an entity of type 'a' at position bc, de.
+; Returns the entity id in 'a' and a pointer to it in hl.
+; DEV NOTE: This code is EXTREMELY sensitive to the order of the
+; Entity struct.
+spawn_entity::
+    ; TODO this obviously does not actually work yet; it should
+    ; find an empty slot, maybe have a way to return an error,
+    ; etc.
+    ld hl, anise
+    ; Type
+    ld [hl+], a
+    ; Position
+    ld [hl], b
+    inc hl
+    ld [hl], c
+    inc hl
+    ld [hl], d
+    inc hl
+    ld [hl], e
+    inc hl
+    ; Velocity
+    xor a
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl+], a
+    ; Facing
+    ld a, FACING_DOWN
+    ld [hl+], a
+    ; Pose
+    xor a  ; idle, for now, i guess
+    ld [hl+], a
+    ; Frame
+    ld [hl+], a
+    ; Countdown
+    ld a, ANIMATION_LENGTH
+    ld [hl+], a
+
+    ld hl, anise
+    ret
+
+
+; Given an entity pointed to by hl, put its x and y screen
+; coordinates in bc.
+get_entity_screen_position::
+    inc hl              ; x field
+    ; TODO should of course subtract the camera offset and
+    ; whatnot
+
+    ; Load x coordinate into b, with 12.4 -> 8 conversion
+    ; aaaabbbb ccccdddd => bbbbcccc
+    ld a, [hl+]                 ; a = aaaabbbb
+    swap a                      ; a = bbbbaaaa
+    and a, $f0                  ; a = bbbb0000
+    ld b, a                     ; b = bbbb0000
+    ld a, [hl+]                 ; a = ccccdddd
+    swap a                      ; a = ddddcccc
+    and a, $0f                  ; a = 0000cccc
+    or a, b                     ; a = bbbbcccc
+    ld b, a                     ; b = bbbbcccc
+
+    ; Load y coordinate into c
+    ld a, [hl+]
+    swap a
+    and a, $f0
+    ld c, a
+    ld a, [hl+]
+    swap a
+    and a, $0f
+    or a, c
+    ld c, a
+
+    ret

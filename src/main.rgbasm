@@ -1,4 +1,5 @@
 include "inc/vendor/hardware.rgbasm"
+include "inc/types/entity.rgbasm"
 include "inc/math.rgbasm"
 
 ; Constants
@@ -6,18 +7,11 @@ STACK_SIZE    EQU $200
 
 MAX_ENTITIES EQU 16
 
-FACING_DOWN   EQU 0
-FACING_UP     EQU 1
-FACING_RIGHT  EQU 2
-FACING_LEFT   EQU 3
-
 BYTES_PER_TILE EQU 16
 BYTES_PER_OBJECT EQU 32
 
 SPRITESO_PALETTES EQU 0
 SPRITESO_TILES EQU 64
-
-ANIMATION_LENGTH EQU 5
 
 dcolor: MACRO  ; COLOR($rrggbb) -> gbc representation
 _r = ((\1) & $ff0000) >> 16 >> 3
@@ -195,51 +189,16 @@ start:
     ld a, LOW(SPRITES_ANISE + SPRITESO_TILES)
     ld [anise_sprites_address + 1], a
 
-    ; Place Anise at 64, 64, which in 12.4 is $04 $00
-    ; TODO probably make a helper for this
-    ld a, $04
-    ld [anise_x], a
-    ld [anise_y], a
-    xor a
-    ld [anise_x + 1], a
-    ld [anise_y + 1], a
-    ld [anise_vx], a
-    ld [anise_vy], a
-    ; And init some other stuff
-    ld a, FACING_DOWN
-    ld [anise_facing], a
-    ld a, 0  ; idle
-    ld [anise_pose], a
-    ld a, ANIMATION_LENGTH
-    ld [anise_frame_countdown], a
+    ; Spawn Anise
+    ld a, 0
+    ld bc, 64 << 4
+    ld de, 64 << 4
+    call spawn_entity
 
     ; Put an object on the screen
 
     ; ANTENNA
-    ld hl, anise_x              ; b/c = x/y
-    ; Load x coordinate into b, with 12.4 -> 8 conversion
-    ; aaaabbbb ccccdddd => bbbbcccc
-    ; TODO should of course subtract the camera offset and
-    ; whatnot
-    ld a, [hl+]                 ; a = aaaabbbb
-    swap a                      ; a = bbbbaaaa
-    and a, $f0                  ; a = bbbb0000
-    ld b, a                     ; b = bbbb0000
-    ld a, [hl+]                 ; a = ccccdddd
-    swap a                      ; a = ddddcccc
-    and a, $0f                  ; a = 0000cccc
-    or a, b                     ; a = bbbbcccc
-    ld b, a                     ; b = bbbbcccc
-    ; Load y coordinate into c
-    ld a, [hl+]
-    swap a
-    and a, $f0
-    ld c, a
-    ld a, [hl+]
-    swap a
-    and a, $0f
-    or a, c
-    ld c, a
+    call get_entity_screen_position
     ld hl, ANISE_SPRITE_POSITIONS
     ; x-coord
     ld a, [hl+]
@@ -433,27 +392,27 @@ main:
     ; TODO maybe handle x/y separately and more... deliberately
     ; TODO prevent SR40?
     xor a
-    ld [anise_vx], a
-    ld [anise_vy], a
+    ld [anise + Entity_vx], a
+    ld [anise + Entity_vy], a
     ld a, [buttons]
     bit PADB_LEFT, a
     jr z, .skip_left
-    ld hl, anise_vx
+    ld hl, anise + Entity_vx
     ld [hl], $f0
 .skip_left:
     bit PADB_RIGHT, a
     jr z, .skip_right
-    ld hl, anise_vx
+    ld hl, anise + Entity_vx
     ld [hl], $10
 .skip_right:
     bit PADB_UP, a
     jr z, .skip_up
-    ld hl, anise_vy
+    ld hl, anise + Entity_vy
     ld [hl], $f0
 .skip_up:
     bit PADB_DOWN, a
     jr z, .skip_down
-    ld hl, anise_vy
+    ld hl, anise + Entity_vy
     ld [hl], $10
 .skip_down:
 
@@ -480,15 +439,15 @@ _is_y = (\1 == 1)
 _is_neg = (\2 == 0)
 _is_pos = (\2 == 1)
 IF _is_x
-_p_pos EQUS "anise_x"
-_q_pos EQUS "anise_y"
-_p_vel EQUS "anise_vx"
-_q_vel EQUS "anise_vy"
+_p_pos EQUS "anise + Entity_x"
+_q_pos EQUS "anise + Entity_y"
+_p_vel EQUS "anise + Entity_vx"
+_q_vel EQUS "anise + Entity_vy"
 ELSE
-_p_pos EQUS "anise_y"
-_q_pos EQUS "anise_x"
-_p_vel EQUS "anise_vy"
-_q_vel EQUS "anise_vx"
+_p_pos EQUS "anise + Entity_y"
+_q_pos EQUS "anise + Entity_x"
+_p_vel EQUS "anise + Entity_vy"
+_q_vel EQUS "anise + Entity_vx"
 ENDC
 
     ; In the following comments:
@@ -902,14 +861,14 @@ ENDM
 
     ; x axis
     ; Load current x position into bc
-    ld hl, anise_x
+    ld hl, anise + Entity_x
     ld a, [hl+]
     ld b, a
     ld c, [hl]
     ld a, b
     ; Check x velocity (i.e. movement).  Positive and negative
     ; are, alas, separate cases; zero means skip entirely
-    ld hl, anise_vx
+    ld hl, anise + Entity_vx
     ld a, [hl]
     cp a, $80
     jp nc, .negative_x
@@ -925,14 +884,14 @@ ENDM
 
     ; y axis
     ; Load current y position into bc
-    ld hl, anise_y
+    ld hl, anise + Entity_y
     ld a, [hl+]
     ld b, a
     ld c, [hl]
     ld a, b
     ; Check y velocity (i.e. movement).  Positive and negative
     ; are, alas, separate cases; zero means skip entirely
-    ld hl, anise_vy
+    ld hl, anise + Entity_vy
     ld a, [hl]
     cp a, $80
     jp nc, .negative_y
@@ -946,36 +905,14 @@ ENDM
 .done_y:
 
     ; Update sprite positions, hackily
-    ; Load x coordinate into b, with 12.4 -> 8 conversion
-    ; aaaabbbb ccccdddd => bbbbcccc
-    ; TODO should of course subtract the camera offset and
-    ; whatnot
-    ld hl, anise_x
-    ld a, [hl+]                 ; a = aaaabbbb
-    swap a                      ; a = bbbbaaaa
-    and a, $f0                  ; a = bbbb0000
-    ld b, a                     ; b = bbbb0000
-    ld a, [hl+]                 ; a = ccccdddd
-    swap a                      ; a = ddddcccc
-    and a, $0f                  ; a = 0000cccc
-    or a, b                     ; a = bbbbcccc
-    ld b, a                     ; b = bbbbcccc
-    ; Load y coordinate into c
-    ld a, [hl+]
-    swap a
-    and a, $f0
-    ld c, a
-    ld a, [hl+]
-    swap a
-    and a, $0f
-    or a, c
-    ld c, a
+    ld hl, anise
+    call get_entity_screen_position
     ; Get the table of sprite offsets.  Note that these can be
     ; different depending on the facing angle (thanks, Anise)!
     ; FIXME whoops i seem to have hardcoded the size of the
     ; table here
     ld hl, ANISE_SPRITE_POSITIONS
-    ld a, [anise_facing]
+    ld a, [anise + Entity_facing]
     ld de, 6
     or a
     jr z, .skip_stride_facing_positions
@@ -1030,7 +967,7 @@ ENDM
     ; TODO hey i could just keep shifting and...  wait is there any point to that, maybe it's faster?
     ; TODO whoops, this doesn't work if you let go of the button.
     ; Previous facing goes in b
-    ld hl, anise_facing
+    ld hl, anise + Entity_facing
     ld b, [hl]
     ld a, [buttons_pressed]
     bit PADB_LEFT, a
@@ -1076,7 +1013,7 @@ ENDM
 .pose_idle:
 
     ; Restart the animation if the pose changed
-    ld a, [anise_pose]
+    ld a, [anise + Entity_pose]
     cp d
     jr z, .pose_unchanged
     ld e, 1
@@ -1088,11 +1025,11 @@ ENDM
     bit 0, e
     jr z, .static_pose_check
     ld a, d
-    ld [anise_pose], a
+    ld [anise + Entity_pose], a
     ; FIXME this cleverly starts walking at frame 1, which means
     ; tapping a direction will continually put a foot out rather
     ; than gradually sliding.  but it's not a /great/ solution
-    ld [anise_frame], a
+    ld [anise + Entity_frame], a
     jr .skip_static_pose_check
 
 .static_pose_check:
@@ -1103,24 +1040,24 @@ ENDM
     jp z, .no_movement
     ; Otherwise, tick down the frame counter.  If it doesn't hit
     ; zero, there's nothing to do.
-    ld a, [anise_frame_countdown]
+    ld a, [anise + Entity_countdown]
     dec a
-    ld [anise_frame_countdown], a
+    ld [anise + Entity_countdown], a
     jp nz, .no_movement
 
     ; If it /did/ hit zero, bump to the next frame.  (This
     ; happens before the following label so it doesn't clobber
     ; setting the frame to 0 for a restarted animation.)
-    ld a, [anise_frame]
+    ld a, [anise + Entity_frame]
     inc a
     and a, 4 - 1
-    ld [anise_frame], a
+    ld [anise + Entity_frame], a
 
 .skip_static_pose_check:
 
     ; This is the start of a frame, so restart the countdown
     ld a, ANIMATION_LENGTH
-    ld [anise_frame_countdown], a
+    ld [anise + Entity_countdown], a
 
     ; Anise has a unique sprite, so overwrite the current tile
     ; rather than changing tiles
@@ -1129,7 +1066,7 @@ ENDM
     ; Armed with a pose and a frame, find where it actually is!
     ; First find the frame's row; there are 4 facing columns in
     ; a sheet, so stride over 4 facings * 3 sprites per frame
-    ld a, [anise_frame]
+    ld a, [anise + Entity_frame]
     or a
     jr z, .skip_stride_frame
     ld bc, 4 * 3 * BYTES_PER_OBJECT
@@ -1140,7 +1077,7 @@ ENDM
 .skip_stride_frame:
 
     ; Next find the facing, which is the column
-    ld a, [anise_facing]
+    ld a, [anise + Entity_facing]
     and a, %11                      ; cap to 4, just in case
     jr z, .skip_stride_facing       ; handle zero case
     ld bc, 3 * BYTES_PER_OBJECT
@@ -1344,31 +1281,12 @@ buttons_pressed:
     db
 buttons_released:
     db
-anise_type:
-    db
-; Position, two words per coordinate, as 12.4 fixed point.
-; This has the advantage that the high byte is grid cell
-anise_x:
-    dw
-anise_y:
-    dw
-; Velocity, in pixels per tic, as 11.4 fixed point.
-; TODO i only really /need/ 3.4 but i don't know how to handle
-; the sign then...
-anise_vx:
-    dw
-anise_vy:
-    dw
-anise_facing:
-    db
-anise_pose:
-    db
-anise_frame:
-    db
-anise_frame_countdown:
-    db
+anise::
+    ds sizeof_Entity
+; TODO replace this with a general sprite update queue
 anise_sprites_address:
     dw
+; TODO expand me into a real entity
 cheezball_x:
     dw
 cheezball_y:
