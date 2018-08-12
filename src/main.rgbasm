@@ -1,4 +1,4 @@
-include "inc/hardware.inc"
+include "inc/vendor/hardware.rgbasm"
 include "inc/math.rgbasm"
 
 ; Constants
