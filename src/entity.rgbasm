@@ -42,7 +42,7 @@ spawn_entity::
 .skip_stride_entity:
 
     ; hl = new entity
-    push hl             ; to restore once we're done
+    push hl                     ; to restore once we're done
     ; Type
     ld [hl+], a
     ; Position
@@ -79,7 +79,7 @@ spawn_entity::
 ; Given an entity pointed to by hl, put its x and y screen
 ; coordinates in bc.
 get_entity_screen_position::
-    inc hl              ; x field
+    inc hl                      ; x field
     ; TODO should of course subtract the camera offset and
     ; whatnot
 

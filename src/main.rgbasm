@@ -137,7 +137,11 @@ start:
 
     ; Zero-fill some important stuff
     xor a
+    ld [buttons], a
     ld [entity_count], a
+    ld hl, oam_buffer
+    ld c, 160
+    call fill
     ld hl, entities_sorted_x_pos
     ld c, MAX_ENTITIES * 3
     call fill
@@ -351,7 +355,12 @@ main:
     ; that time!
 
     ; Use DMA to copy our OAM buffer into real OAM
+    ; DISABLE INTERRUPTS during this -- a timer can still fire
+    ; in the middle of it, when the entire memory map is
+    ; inaccessible!
+    di
     call h_dma
+    ei
 
     ; Update Anise's current sprite.  Use DMA here because...
     ; well, geez, it's too slow otherwise.
@@ -833,7 +842,6 @@ ENDC
     ld a, c
     ld [_p_pos + 1], a
     pop hl
-    pop bc
     jp \3
 
 .skip_entity_check\@:
