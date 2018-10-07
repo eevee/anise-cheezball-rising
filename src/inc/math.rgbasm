@@ -1,5 +1,7 @@
 ; Various math macros, for ease of reading math-heavy code.
 
+; TODO maybe write out the sizes and costs of these
+
 ; Negates a 16-bit register.
 ; Trashes 'a'.
 ; ex: Negate16 de

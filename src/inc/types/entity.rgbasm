@@ -9,12 +9,30 @@ FACING_LEFT   EQU 3
 
 ANIMATION_LENGTH EQU 5
 
-    struct EntityType
+; Entity kind flags
+; Can only appear once on screen at a time, so should have a
+; char reserved for it specifically, rather than filling the
+; charmap with all possible sprites (TODO explain better)
+; (also TODO how the fuck do i allocate sprites actually)
+ENTITYF_UNIQUE_SPRITE   EQU %00000001
+
+ENTITYB_UNIQUE_SPRITE EQU 0
+
+    ; Definition for a particular kind of entity, e.g. Anise or
+    ; a projectile or what have you.  Lives in ROM.
+    struct EntityKind
+    bytes 1, flags
     bytes 1, radius
+    ; This is actually a count followed by an arbitrary amount
+    ; of stuff, so it goes last
+    ; TODO doc the stuff
+    ; TODO can i improve on this somehow?
+    bytes 1, sprites
     end_struct
 
+    ; State for a single entity instance.  Lives in RAM.
     struct Entity
-    bytes 1, type
+    bytes 1, kind
     ; Position in pixels as 12.4 fixed point.
     ; This has the advantage that the high byte is the cell.
     words 1, x

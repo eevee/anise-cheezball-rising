@@ -1,7 +1,18 @@
 include "inc/types/entity.rgbasm"
+include "inc/math.rgbasm"
+
+
+SECTION "High locals: entity", HRAM
+; TODO need to find a way to reuse these
+h_loop_counter1:
+    db
+h_loop_counter2:
+    db
+h_facing:
+    db
+
 
 SECTION "Entity data", WRAM0
-
 entity_count::
     db
 entities::
@@ -11,6 +22,84 @@ anise::
     ds sizeof_Entity
 cheezball::
     ds sizeof_Entity * (MAX_ENTITIES)
+; A list of entity INDICES, sorted by their y coordinates.  Used
+; for building the OAM buffer.
+entities_sorted_y::
+    ds MAX_ENTITIES
+
+
+; TODO does this live here??
+SECTION "OAM Buffer", WRAM0[$C100]
+oam_buffer::
+    ds 4 * 40
+
+
+SECTION "Entity kinds", ROM0
+; 00 -- The player!
+ENTITY_KIND_ANISE::
+    db 0        ; flags
+; TODO remove me, sigh
+ANISE_RADIUS::
+    db 4 << 4   ; radius
+    ; sprite config
+    db 3        ; number of sprites
+    ; antenna
+    db 0        ; tile
+    db 0        ; props
+    db -2, -20  ; down offset
+    db -7, -20  ; up offset
+    db -4, -20  ; right offset
+    db -4, -20  ; left offset
+    ; left part
+    db 2
+    db %00000001
+    db -8, -14
+    db -8, -14
+    db -8, -14
+    db -8, -14
+    ; right part
+    db 4
+    db %00000001
+    db 0, -14
+    db 0, -14
+    db 0, -14
+    db 0, -14
+; 01 -- Cheezball
+ENTITY_KIND_CHEEZBALL::
+    db 0
+; TODO remove me
+CHEEZBALL_RADIUS::
+    db 4 << 4
+    ; sprite config
+    db 3
+    ; antenna
+    db 6
+    db %00000011
+    db -3, -17
+    db -3, -17
+    db -3, -17
+    db -3, -17
+    ; left
+    db 8
+    db %00000010
+    db -8, -14
+    db -8, -14
+    db -8, -14
+    db -8, -14
+    ; right
+    db 10
+    db %00000010
+    db 0, -14
+    db 0, -14
+    db 0, -14
+    db 0, -14
+
+
+; List of pointers to all entities in order, for quick lookup
+ENTITY_KINDS::
+    dw ENTITY_KIND_ANISE            ; 00
+    dw ENTITY_KIND_CHEEZBALL        ; 01
+
 
 SECTION "Entity code", ROM0
 
@@ -19,6 +108,9 @@ SECTION "Entity code", ROM0
 ; DEV NOTE: This code is EXTREMELY sensitive to the order of the
 ; Entity struct.
 spawn_entity::
+    ; Stash type
+    push af
+
     ; TODO this obviously does not actually work yet; it should
     ; find an empty slot, maybe have a way to return an error if
     ; there isn't one, etc.  or maybe some entities are
@@ -26,6 +118,14 @@ spawn_entity::
     ld hl, entity_count
     ld a, [hl]
     inc [hl]
+
+    ; Append the new entity id to the sorted list
+    ld hl, entities_sorted_y
+    push af
+    AddATo16 hl
+    pop af
+    ld [hl], a
+
     ld hl, entities
     ; TODO maybe i should have a "multiply onto hl" function
     ; TODO this is probably suboptimal since sizeof_Entity is
@@ -40,6 +140,9 @@ spawn_entity::
     jr nz, .stride_entity
     pop bc
 .skip_stride_entity:
+
+    ; Restore type
+    pop af
 
     ; hl = new entity
     push hl                     ; to restore once we're done
@@ -76,8 +179,148 @@ spawn_entity::
     ret
 
 
+; Updates the sorted entity lists.  Should be called at the end
+; of any frame where any entity moved.
+sort_entities::
+    ld a, [entity_count]
+    ld hl, entities_sorted_y
+    ; TODO actually do this i suppose.
+    ret
+
+
+; Updates OAM!
+; Trashes everything.
+update_oam::
+    ; de <- oam buffer slot
+    ld de, oam_buffer
+
+    ; Read the number of entities
+    ld hl, entity_count
+    ld a, [hl]
+    or a, a
+    jr z, .skip_loop_entity
+    ldh [h_loop_counter1], a
+
+    ld hl, entities_sorted_y
+
+.loop_entity:
+    ; Read the next entity id
+    ld a, [hl+]
+    push hl
+
+    ; Set hl to the entity address
+    ld hl, entities
+    ; TODO do i need a multiply-and-add-to-hl?
+    or a, a
+    jr z, .skip_stride_entity
+    push bc
+    ld bc, sizeof_Entity
+.stride_entity:
+    add hl, bc
+    dec a
+    jr nz, .stride_entity
+    pop bc
+.skip_stride_entity:
+
+    push de
+
+    ; e <- entity kind index * 2
+    ld a, [hl]
+    add a, a
+    ld e, a
+    ; bc <- x and y screen coords
+    call get_entity_screen_position
+
+    ; a <- facing
+    ld a, Entity_facing - (Entity_y + 2)
+    AddATo16 hl
+    ld a, [hl]
+    ldh [h_facing], a
+
+    ; hl <- entity kind sprite offsets
+    ld hl, ENTITY_KINDS
+    Add8To16 hl, e
+    ; TODO macro for loading hl into itself?
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ld a, EntityKind_sprites
+    AddATo16 hl
+
+    pop de
+
+    ; Read the sprite count
+    ; NOTE: Must always be at least 1!  (FIXME?)
+    ld a, [hl+]
+    ldh [h_loop_counter2], a
+
+.loop_sprite:
+    ; Populate the buffer
+    ; 2: chr index
+    ld a, [hl+]
+    inc de
+    inc de
+    ld [de], a
+    ; 3: attributes
+    ld a, [hl+]
+    inc de
+    ld [de], a
+    ; Take facing into account
+    ldh a, [h_facing]
+    add a, a
+    AddATo16 hl
+    ; 1: x-coord
+    ld a, [hl+]
+    add a, b
+    add a, 8
+    dec de
+    dec de
+    ld [de], a
+    ; 0: y-coord
+    ld a, [hl+]
+    add a, c
+    add a, 16
+    dec de
+    ld [de], a
+
+    ; Move de to the next OAM slot
+    inc de
+    inc de
+    inc de
+    inc de
+
+    ; Skip to the beginning of the next sprite
+    ; TODO don't need to do this on the last iteration
+    ldh a, [h_facing]
+    ; a <- 3 - a
+    cpl
+    and a, %11
+    add a, a
+    AddATo16 hl
+
+    ; Loop to the next sprite
+    ldh a, [h_loop_counter2]
+    dec a
+    ldh [h_loop_counter2], a
+    jr nz, .loop_sprite
+
+    pop hl
+
+    ; Loop to the next entity
+    ldh a, [h_loop_counter1]
+    dec a
+    ldh [h_loop_counter1], a
+    jr nz, .loop_entity
+
+.skip_loop_entity:
+
+    ; TODO clear the rest of the buffer
+
+    ret
+
 ; Given an entity pointed to by hl, put its x and y screen
 ; coordinates in bc.
+; Trashes a.  Bumps hl to point to the field after y.
 get_entity_screen_position::
     inc hl                      ; x field
     ; TODO should of course subtract the camera offset and
