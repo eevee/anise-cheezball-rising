@@ -78,3 +78,20 @@ Compare16: MACRO
     cp a, LOW(\2)
 .not_equal_high\@:
 ENDM
+
+; Multiply a by some literal and add the result to hl.
+; TODO this could probably use some variants.  for example, if
+; the literal fits in 8 bits, could this be faster?
+StrideLiteralIntoHL: MACRO
+    or a, a
+    jr z, .skip_stride\@
+    ; TODO is this push always necessary?  urgh
+    push bc
+    ld bc, \1
+.stride\@:
+    add hl, bc
+    dec a
+    jr nz, .stride\@
+    pop bc
+.skip_stride\@:
+ENDM

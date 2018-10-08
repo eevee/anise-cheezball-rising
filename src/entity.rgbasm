@@ -22,10 +22,10 @@ anise::
     ds sizeof_Entity
 cheezball::
     ds sizeof_Entity * (MAX_ENTITIES)
-; A list of entity INDICES, sorted by their y coordinates.  Used
+; A list of entity pointers, sorted by their y coordinates.  Used
 ; for building the OAM buffer.
 entities_sorted_y::
-    ds MAX_ENTITIES
+    ds MAX_ENTITIES * 2
 
 
 ; TODO does this live here??
@@ -119,27 +119,22 @@ spawn_entity::
     ld a, [hl]
     inc [hl]
 
-    ; Append the new entity id to the sorted list
-    ld hl, entities_sorted_y
-    push af
-    AddATo16 hl
-    pop af
-    ld [hl], a
-
     ld hl, entities
-    ; TODO maybe i should have a "multiply onto hl" function
-    ; TODO this is probably suboptimal since sizeof_Entity is
-    ; small enough to fit in one byte?  also it's constant
-    or a, a
-    jr z, .skip_stride_entity
-    push bc
-    ld bc, sizeof_Entity
-.stride_entity:
-    add hl, bc
-    dec a
-    jr nz, .stride_entity
-    pop bc
-.skip_stride_entity:
+    push af
+    StrideLiteralIntoHL sizeof_Entity
+    pop af
+
+    ; Append the new entity pointer to the sorted list
+    push de
+    ld de, entities_sorted_y
+    add a, a
+    AddATo16 de
+    ld a, l
+    ld [de], a
+    inc de
+    ld a, h
+    ld [de], a
+    pop de
 
     ; Restore type
     pop af
@@ -183,8 +178,96 @@ spawn_entity::
 ; of any frame where any entity moved.
 sort_entities::
     ld a, [entity_count]
+    ; Zero or one entities are trivially sorted
+    cp a, 2
+    ret c
+
+    ; Insertion sort!
+    ; b <- index of the entity pointer being inserted
+    ld b, 1
+    ; hl <- address of pointer #0
     ld hl, entities_sorted_y
-    ; TODO actually do this i suppose.
+.outer_loop:
+    ; Bump hl to match b
+    inc hl
+    inc hl
+    push hl
+    ; de <- address of candidate's y coordinate
+    ld e, [hl]
+    inc hl
+    ld d, [hl]
+    dec hl
+    push de
+    ld a, Entity_y
+    AddATo16 de
+    ; c <- position to insert
+    ld c, b
+    ; Search backwards for the right position
+.inner_loop:
+    ; hl <- address of pointer #(c - 1)
+    push hl
+    dec hl
+    dec hl
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ld a, Entity_y
+    AddATo16 hl
+
+    ; if A[j - 1]->y <= y
+    ;     break
+    ld a, [de]
+    cp a, [hl]
+    jr c, .break_inner_loop
+    jr nz, .continue_with_swap
+    inc de
+    inc hl
+    ld a, [de]
+    cp a, [hl]
+    jr c, .break_inner_loop
+    jr z, .break_inner_loop
+
+.continue_with_swap:
+    pop hl
+
+    ; Copy pointer #(c - 1) into slot #c
+    dec hl
+    dec hl
+    ld a, [hl+]
+    inc hl
+    ld [hl-], a
+    ld a, [hl+]
+    inc hl
+    ld [hl], a
+    dec hl
+
+    ; j ← j - 1
+    dec c
+    dec hl
+    dec hl
+
+    ; if j <= 0
+    ;     break
+    jr nz, .inner_loop
+
+    ; FIXME this superfluous push vexes me
+    push hl
+.break_inner_loop:
+    pop hl
+    ; A[j] ← x
+    pop de
+    ld [hl], e
+    inc hl
+    ld [hl], d
+
+    ; i ← i + 1
+    inc b
+    ld a, b
+    ld hl, entity_count
+    cp a, [hl]
+    pop hl
+    jr nz, .outer_loop
+
     ret
 
 
@@ -204,23 +287,13 @@ update_oam::
     ld hl, entities_sorted_y
 
 .loop_entity:
-    ; Read the next entity id
+    ; Read the next entity address into hl
+    ld a, [hl+]
+    ld b, a
     ld a, [hl+]
     push hl
-
-    ; Set hl to the entity address
-    ld hl, entities
-    ; TODO do i need a multiply-and-add-to-hl?
-    or a, a
-    jr z, .skip_stride_entity
-    push bc
-    ld bc, sizeof_Entity
-.stride_entity:
-    add hl, bc
-    dec a
-    jr nz, .stride_entity
-    pop bc
-.skip_stride_entity:
+    ld h, a
+    ld l, b
 
     push de
 
