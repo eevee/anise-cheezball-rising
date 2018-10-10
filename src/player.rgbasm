@@ -100,7 +100,7 @@ ENDC
     sbc a, b
     ld d, a
     jr nc, .skip_abs_x
-    Negate16 bc
+    Negate16 de
 .skip_abs_x:
     ; If the high byte is not zero, the distance is definitely
     ; bigger than a radius
@@ -127,7 +127,7 @@ ENDC
     sbc a, d
     ld b, a
     jr nc, .skip_abs_y
-    Negate16 de
+    Negate16 bc
 .skip_abs_y:
     ; If the high byte is not zero, the distance is definitely
     ; bigger than a radius
