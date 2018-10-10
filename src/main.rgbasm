@@ -1272,13 +1272,14 @@ show_dialogue:
     ldh [rVBK], a
     xor a
     ld c, BYTES_PER_TILE
-    ld hl, $8800 + 255 * BYTES_PER_TILE
+    ld hl, $8800 + ($ff - $80) * BYTES_PER_TILE
     call fill
 
     ; Row 4
     ld a, 144 - 24 - 1
     ldh [rLYC], a
     ld hl, _SCRN1 + CANVAS_WIDTH_TILES * (CANVAS_HEIGHT_TILES - 3)
+    ld de, $8800 + (TEXT_START_TILE_2 + 1 - $80) * BYTES_PER_TILE
     ld b, TEXT_START_TILE_2 + 1
     call fill_tilemap_row
 
@@ -1288,6 +1289,7 @@ show_dialogue:
     ld a, 144 - 32 - 1
     ldh [rLYC], a
     ld hl, _SCRN1 + CANVAS_WIDTH_TILES * (CANVAS_HEIGHT_TILES - 4)
+    ld de, $8800 + (TEXT_START_TILE_2 - $80) * BYTES_PER_TILE
     ld b, TEXT_START_TILE_2
     call fill_tilemap_row
 
@@ -1297,6 +1299,7 @@ show_dialogue:
     ld a, 144 - 40 - 1
     ldh [rLYC], a
     ld hl, _SCRN1 + CANVAS_WIDTH_TILES * (CANVAS_HEIGHT_TILES - 5)
+    ld de, $8800 + (TEXT_START_TILE_1 + 1 - $80) * BYTES_PER_TILE
     ld b, TEXT_START_TILE_1 + 1
     call fill_tilemap_row
 
@@ -1306,6 +1309,7 @@ show_dialogue:
     ld a, 144 - 48 - 1
     ldh [rLYC], a
     ld hl, _SCRN1 + CANVAS_WIDTH_TILES * (CANVAS_HEIGHT_TILES - 6)
+    ld de, $8800 + (TEXT_START_TILE_1 - $80) * BYTES_PER_TILE
     ld b, TEXT_START_TILE_1
     call fill_tilemap_row
 
@@ -1541,6 +1545,7 @@ show_dialogue:
 ; TODO this should, you know, probably use the window or be
 ; configurable or sssomething
 ; hl: where to start filling
+; de: pointer to corresponding tile to start erasing
 ; b: tile to start with
 fill_tilemap_row:
     ; Populate bank 0, the tile proper
@@ -1565,6 +1570,20 @@ fill_tilemap_row:
     ld [hl-], a
     dec c
     jr nz, .loop1
+
+    ; Blank out the corresponding tiles
+    ld h, d
+    ld l, e
+    ld de, 16
+    ld c, SCREEN_WIDTH_TILES
+    xor a
+.tile_erase_loop:
+    REPT 16
+    ld [hl+], a
+    ENDR
+    add hl, de
+    dec c
+    jr nz, .tile_erase_loop
 
     ret
 
