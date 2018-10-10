@@ -1127,7 +1127,8 @@ entities_collidable:
 
 SECTION "Font", ROMX
 text:
-    db "The quick brown fox jumps over the     lazy dog's back.  AOOWWRRR!!!!", 0
+    db "hi im chees.\nBall", 0
+    db "The quick brown fox jumps over the\nlazy dog's back.  AOOWWRRR!!!!", 0
     db "Jackdaws love my big sphinx of quartz.", 0
 ; FONT
 font: include "font.inc"
@@ -1148,7 +1149,7 @@ PALETTE_TEXT:
     dcolor $000000
     dcolor $ffffff
     dcolor $999999
-    dcolor $666666
+    dcolor $333333
 
 SCREEN_WIDTH_TILES EQU 20
 CANVAS_WIDTH_TILES EQU 32
@@ -1236,6 +1237,11 @@ show_dialogue:
     and a                       ; if NUL, we're done!
     jp z, .done
     inc de                      ; otherwise, increment
+
+    ; Handle special characters
+    ; newline
+    cp a, 10
+    jp z, .handle_newline
 
     ; Get the font character
     push de                     ; from here, de is tiles
@@ -1387,11 +1393,37 @@ show_dialogue:
     jp .next_letter
 
 .done:
-    EnableLCD  ; TODO get rid of me with a buffer
+.wait:
+    call wait_for_vblank
+    call read_input
+    ld a, [buttons_pressed]
+    bit PADB_A, a
+    jr z, .wait
+
     ; Remember to reset bank to 0!
     xor a
     ldh [rVBK], a
     ret
+
+
+.handle_newline:
+    ; Bump us onto the next row
+    ; TODO obviously do something more interesting if there are
+    ; more than two lines of text
+    ; Empty the text buffer
+    xor a
+    ld hl, text_buffer
+    ld c, $40
+    call fill
+    ; Move char cursor to the next line
+    ld hl, $8800 + 2 * SCREEN_WIDTH_TILES * BYTES_PER_TILE
+    ; Reset the text offsets
+    ld a, 4
+    ld [text_y], a
+    ld [text_x], a
+    ld b, 4
+    call wait_for_vblank
+    jp .next_letter
 
 
 ; Fill a row in the tilemap in a way that's helpful to dialogue.
