@@ -24,6 +24,7 @@ ENTITYB_UNIQUE_SPRITE EQU 0
     bytes 1, flags
     ; Radius as 4.4 fixed point (so the max size is 32px)
     bytes 1, radius
+    words 1, tileset
     ; This is actually a count followed by an arbitrary amount
     ; of stuff, so it goes last
     ; TODO doc the stuff
@@ -31,9 +32,14 @@ ENTITYB_UNIQUE_SPRITE EQU 0
     bytes 1, sprites
     end_struct
 
+ENTITYF_RESTART_SPRITE  EQU %00000001
+
+ENTITYB_RESTART_SPRITE  EQU 0
+
     ; State for a single entity instance.  Lives in RAM.
     struct Entity
     bytes 1, kind
+    bytes 1, flags
     ; Position in pixels as 12.4 fixed point.
     ; This has the advantage that the high byte is the cell.
     words 1, x

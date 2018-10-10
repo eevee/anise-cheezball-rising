@@ -2,6 +2,10 @@ include "inc/types/entity.rgbasm"
 include "inc/juggling.rgbasm"
 include "inc/math.rgbasm"
 
+; TODO make a constants file
+BYTES_PER_OBJECT EQU 32
+SPRITESO_TILES EQU 64
+
 
 SECTION "High locals: entity", HRAM
 ; TODO need to find a way to reuse these
@@ -42,6 +46,7 @@ ENTITY_KIND_ANISE::
 ; TODO remove me, sigh
 ANISE_RADIUS::
     db 4 << 4   ; radius
+    dw SPRITES_ANISE
     ; sprite config
     db 3        ; number of sprites
     ; antenna
@@ -71,15 +76,16 @@ ENTITY_KIND_CHEEZBALL::
 ; TODO remove me
 CHEEZBALL_RADIUS::
     db 4 << 4
+    dw SPRITES_CHEEZBALL
     ; sprite config
     db 3
     ; antenna
     db 6
     db %00000011
     db -3, -17
-    db -3, -17
-    db -3, -17
-    db -3, -17
+    db -5, -17
+    db -4, -17
+    db -4, -17
     ; left
     db 8
     db %00000010
@@ -144,15 +150,18 @@ spawn_entity::
     push hl                     ; to restore once we're done
     ; Type
     ld [hl+], a
+    ; Flags
+    xor a
+    ld [hl+], a
     ; Position
-    ld [hl], b
-    inc hl
-    ld [hl], c
-    inc hl
-    ld [hl], d
-    inc hl
-    ld [hl], e
-    inc hl
+    ld a, b
+    ld [hl+], a
+    ld a, c
+    ld [hl+], a
+    ld a, d
+    ld [hl+], a
+    ld a, e
+    ld [hl+], a
     ; Velocity
     xor a
     ld [hl+], a
@@ -172,6 +181,130 @@ spawn_entity::
     ld [hl+], a
 
     pop hl
+    ret
+
+
+; Updates an entity's sprites to match whatever it did this
+; frame, if anything.
+; hl: address of entity
+; Trashes everything.
+update_entity_sprites::
+    ; Check whether to actually do anything.
+    ; If the animation is forcibly being restarted, we restart
+    ; at frame zero and skip these checks.
+    TraverseField Entity_flags
+    ld a, [hl]
+    ; Clear the flag regardless
+    res ENTITYB_RESTART_SPRITE, [hl]
+    TraverseField Entity_pose - Entity_flags
+    bit ENTITYB_RESTART_SPRITE, a
+    jr z, .static_pose_check
+    TraverseField Entity_frame - Entity_pose
+    jr .skip_static_pose_check
+
+.static_pose_check:
+    ; If this is a static pose (i.e. idle), there's only one
+    ; frame of animation, so nothing to do here.
+    ld a, [hl]
+    cp a, 0
+    ret z
+    ; Otherwise, tick down the frame counter.  If it doesn't hit
+    ; zero, there's nothing to do.
+    TraverseField Entity_countdown - Entity_pose
+    dec [hl]
+    ret nz
+
+    ; If it /did/ hit zero, bump to the next frame.  (This
+    ; happens before the following label so it doesn't clobber
+    ; setting the frame to 0 for a restarted animation.)
+    TraverseField Entity_frame - Entity_countdown
+    ld a, [hl]
+    inc a
+    ; FIXME hardcoded to four frames, is that okay
+    and a, 4 - 1
+    ld [hl], a
+
+.skip_static_pose_check:
+
+    ; This is the start of a frame, so restart the countdown
+    ld a, ANIMATION_LENGTH
+    TraverseField Entity_countdown - Entity_frame
+    ld [hl], a
+
+    ; Anise has a unique sprite, so overwrite the current tile
+    ; rather than changing tiles
+    push hl
+    TraverseField Entity_kind - Entity_countdown
+    ld a, [hl]
+    add a, a
+    ld hl, ENTITY_KINDS
+    AddATo16 hl
+    DerefHL
+    TraverseField EntityKind_tileset
+    ld a, [hl+]
+    ld e, a
+    ld a, [hl+]
+    ld d, a
+    ld a, SPRITESO_TILES
+    AddATo16 de
+    ; While we're here, get the first tile index so we know
+    ; where to put the sprite
+    TraverseField (EntityKind_sprites + 1) - (EntityKind_tileset + 2)
+    ld b, [hl]
+    pop hl
+
+    ; Armed with a pose and a frame, find where it actually is!
+    ; First find the frame's row; there are 4 facing columns in
+    ; a sheet, so stride over 4 facings per frame
+    ; TODO could we just find the coordinate and stride /once/?
+    TraverseField Entity_frame - Entity_countdown
+    ld a, [hl]
+    rlca
+    rlca
+    ; Next find the facing, which is the column
+    TraverseField Entity_facing - Entity_frame
+    add a, [hl]
+    ; TODO this seemed like a good idea at the time but doesn't
+    ; work with the new approach
+    ;and a, %11                      ; cap to 4, just in case
+    ; Each cell is 3 sprites, so stride over A times the size of
+    ; a cell
+    ; TODO should use the actual sprite count, oof
+    ld h, d
+    ld l, e
+    StrideLiteralIntoHL 3 * BYTES_PER_OBJECT
+
+    ; Store the new sprite address, to be updated during vblank
+    ; TODO this is a bit wordy and is repeated multiple times, tut tut
+    ld d, h
+    ld e, l
+    ld hl, gdma_queue
+    push bc
+    ld b, 0
+    ld c, [hl]
+    inc [hl]
+    inc hl
+    add hl, bc
+    sla c
+    rl b
+    sla c
+    rl b
+    add hl, bc
+    pop bc
+    ld a, e
+    ld [hl+], a
+    ld a, d
+    ld [hl+], a
+    ; b is the tile to start redrawing
+    ; TODO this only works for small indexes
+    ld a, b
+    swap a
+    ld [hl+], a
+    ld a, HIGH($8000)
+    ld [hl+], a
+    ld a, 5
+    ld [hl+], a
+
     ret
 
 
@@ -393,6 +526,7 @@ update_oam::
 ; coordinates in bc.
 ; Trashes a.  Bumps hl to point to the field after y.
 get_entity_screen_position::
+    inc hl
     inc hl                      ; x field
     ; TODO should of course subtract the camera offset and
     ; whatnot

@@ -7,6 +7,8 @@ SECTION "High locals: player", HRAM
 ; TODO need to find a way to reuse these
 h_radius:
     db
+h_facing2:
+    db
 
 
 SECTION "Player code", ROM0
@@ -31,6 +33,7 @@ handle_player_action::
     ; TODO could use a jump table here
     ld hl, anise + Entity_facing
     ld a, [hl]
+    ldh [h_facing2], a
     cp a, FACING_RIGHT
     jr c, .facing_vert
 .facing_horiz:
@@ -141,8 +144,7 @@ ENDC
     pop bc
 
     ; If we got here, we found a match!
-    ld a, Entity_y
-    SubAFrom16 hl
+    TraverseField -(Entity_x + 1)
     jr .do_action
 
 .skip_entity_x:
@@ -158,7 +160,22 @@ ENDC
     ret
 
 .do_action:
-    ; TODO turn cheezball to face us
+    ; Flag that we're showing dialogue next frame
     ld a, 1
     ld [pending_mode_switch], a
+
+    ; Turn Cheezball to face us
+    TraverseField Entity_facing
+    ld a, [h_facing2]
+    ; Flipping the low bit switches the facing direction
+    xor a, 1
+    cp a, [hl]
+    jr z, .no_facing_change
+    ; Update the facing
+    ld [hl], a
+    ; Also set the sprite restart bit
+    TraverseField Entity_flags - Entity_facing
+    set ENTITYB_RESTART_SPRITE, [hl]
+.no_facing_change:
+
     ret

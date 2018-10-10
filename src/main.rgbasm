@@ -171,6 +171,7 @@ start:
     xor a
     ld [buttons], a
     ld [entity_count], a
+    ld [gdma_queue], a
     ld hl, oam_buffer
     ld c, 160
     call fill
@@ -225,10 +226,27 @@ start:
     ENDR
 
     ; Define an object
-    ld a, HIGH(SPRITES_ANISE + SPRITESO_TILES)
-    ld [anise_sprites_address], a
+    ld hl, gdma_queue
+    ld b, 0
+    ld c, [hl]
+    inc [hl]
+    inc hl
+    add hl, bc
+    sla c
+    rl b
+    sla c
+    rl b
+    add hl, bc
     ld a, LOW(SPRITES_ANISE + SPRITESO_TILES)
-    ld [anise_sprites_address + 1], a
+    ld [hl+], a
+    ld a, HIGH(SPRITES_ANISE + SPRITESO_TILES)
+    ld [hl+], a
+    ld a, LOW($8000)
+    ld [hl+], a
+    ld a, HIGH($8000)
+    ld [hl+], a
+    ld a, 5
+    ld [hl+], a
 
     ; Spawn Anise
     ld a, 0
@@ -243,17 +261,27 @@ start:
     call spawn_entity
 
     ; Load Cheezball's front sprite
-    ld hl, SPRITES_CHEEZBALL + SPRITESO_TILES
-    ld a, h
-    ld [rHDMA1], a
-    ld a, l
-    ld [rHDMA2], a
-    ld a, HIGH($0000)
-    ld [rHDMA3], a
-    ld a, LOW($0000 + 3 * BYTES_PER_OBJECT)
-    ld [rHDMA4], a
-    ld a, (BYTES_PER_OBJECT * 3) / 16 - 1
-    ld [rHDMA5], a
+    ld hl, gdma_queue
+    ld b, 0
+    ld c, [hl]
+    inc [hl]
+    inc hl
+    add hl, bc
+    sla c
+    rl b
+    sla c
+    rl b
+    add hl, bc
+    ld a, LOW(SPRITES_CHEEZBALL + SPRITESO_TILES)
+    ld [hl+], a
+    ld a, HIGH(SPRITES_CHEEZBALL + SPRITESO_TILES)
+    ld [hl+], a
+    ld a, LOW($8000 + 3 * BYTES_PER_OBJECT)
+    ld [hl+], a
+    ld a, HIGH($8000)
+    ld [hl+], a
+    ld a, 5
+    ld [hl+], a
 
     jr _statusbar
 _statusbar_pattern:
@@ -345,23 +373,29 @@ main:
     call h_dma
     ei
 
-    ; Update Anise's current sprite.  Use DMA here because...
-    ; well, geez, it's too slow otherwise.
-    ; TODO that doesn't really bode well in general for me
-    ; TODO there should perhaps just be a list of current tiles
-    ; that need updating, and to what?  hey how does zelda deal
-    ; with animated tiles, I wonder
-    ld hl, anise_sprites_address
+    ; Update any pending sprite changes via GDMA, which is
+    ; hecking fast for this sort of thing
+    ld hl, gdma_queue
     ld a, [hl+]
-    ld [rHDMA1], a
-    ld a, [hl]
-    ld [rHDMA2], a
-    ld a, HIGH($0000)
-    ld [rHDMA3], a
-    ld a, LOW($0000)
-    ld [rHDMA4], a
-    ld a, (BYTES_PER_OBJECT * 3) / 16 - 1
-    ld [rHDMA5], a
+    or a
+    jr z, .skip_gdma
+    ld c, a
+.gdma_loop:
+    ld a, [hl+]
+    ldh [rHDMA2], a
+    ld a, [hl+]
+    ldh [rHDMA1], a
+    ld a, [hl+]
+    ldh [rHDMA4], a
+    ld a, [hl+]
+    ldh [rHDMA3], a
+    ld a, [hl+]
+    ldh [rHDMA5], a
+    dec c
+    jr nz, .gdma_loop
+    xor a
+    ld [gdma_queue], a
+.skip_gdma:
 
     ; END GRAPHICS STUFF
 
@@ -912,14 +946,13 @@ ENDM
     ; ----------------------------------------------------------
     ; Update sprite animation
 
-    ; Use e to store whether the sprite we ultimately show this
-    ; frame is a new one -- i.e. if the facing or pose changed.
     ld e, 0
 
     ; Figure out which way we're facing, based on which (if any)
     ; button is newly-pressed this frame
     ; TODO hey i could just keep shifting and...  wait is there any point to that, maybe it's faster?
     ; TODO whoops, this doesn't work if you let go of the button.
+    ; TODO why does this write to [hl] repeatedly...?
     ; Previous facing goes in b
     ld hl, anise + Entity_facing
     ld b, [hl]
@@ -944,7 +977,6 @@ ENDM
     ld [hl], FACING_DOWN
 .skip_down2:
 
-    ; Restart the animation if the facing changed
     ld a, [hl]
     cp b
     jr z, .skip_facing_changed
@@ -971,83 +1003,30 @@ ENDM
     cp d
     jr z, .pose_unchanged
     ld e, 1
-.pose_unchanged:
 
-    ; Check whether to actually do anything.
-    ; If the animation is forcibly being restarted, we restart
-    ; at frame zero and skip these checks.
-    bit 0, e
-    jr z, .static_pose_check
     ld a, d
     ld [anise + Entity_pose], a
     ; FIXME this cleverly starts walking at frame 1, which means
     ; tapping a direction will continually put a foot out rather
     ; than gradually sliding.  but it's not a /great/ solution
     ld [anise + Entity_frame], a
-    jr .skip_static_pose_check
+.pose_unchanged:
 
-.static_pose_check:
-    ; If this is a static pose (i.e. idle), there's only one
-    ; frame of animation, so nothing to do here.
-    ld a, d
-    cp a, 0
-    jp z, .no_movement
-    ; Otherwise, tick down the frame counter.  If it doesn't hit
-    ; zero, there's nothing to do.
-    ld a, [anise + Entity_countdown]
-    dec a
-    ld [anise + Entity_countdown], a
-    jp nz, .no_movement
+    ; Set the restart flag if necessary
+    ld a, e
+    or a, a
+    jr z, .no_restart
+    ld hl, anise + Entity_flags
+    set ENTITYB_RESTART_SPRITE, [hl]
+.no_restart:
 
-    ; If it /did/ hit zero, bump to the next frame.  (This
-    ; happens before the following label so it doesn't clobber
-    ; setting the frame to 0 for a restarted animation.)
-    ld a, [anise + Entity_frame]
-    inc a
-    and a, 4 - 1
-    ld [anise + Entity_frame], a
+    ; Update Anise's sprites as necessary
+    ld hl, anise
+    call update_entity_sprites
+    ; Also, Cheezball's
+    ld hl, cheezball
+    call update_entity_sprites
 
-.skip_static_pose_check:
-
-    ; This is the start of a frame, so restart the countdown
-    ld a, ANIMATION_LENGTH
-    ld [anise + Entity_countdown], a
-
-    ; Anise has a unique sprite, so overwrite the current tile
-    ; rather than changing tiles
-    ld hl, SPRITES_ANISE + SPRITESO_TILES
-
-    ; Armed with a pose and a frame, find where it actually is!
-    ; First find the frame's row; there are 4 facing columns in
-    ; a sheet, so stride over 4 facings * 3 sprites per frame
-    ld a, [anise + Entity_frame]
-    or a
-    jr z, .skip_stride_frame
-    ld bc, 4 * 3 * BYTES_PER_OBJECT
-.stride_frame:
-    add hl, bc
-    dec a
-    jr nz, .stride_frame
-.skip_stride_frame:
-
-    ; Next find the facing, which is the column
-    ld a, [anise + Entity_facing]
-    and a, %11                      ; cap to 4, just in case
-    jr z, .skip_stride_facing       ; handle zero case
-    ld bc, 3 * BYTES_PER_OBJECT
-.stride_facing:
-    add hl, bc
-    dec a
-    jr nz, .stride_facing
-.skip_stride_facing:
-
-    ; Store the new sprite address, to be updated during vblank
-    ld a, h
-    ld [anise_sprites_address], a
-    ld a, l
-    ld [anise_sprites_address + 1], a
-
-.no_movement:
     ; End-of-frame cleanup
     call sort_entities
     call update_oam
@@ -1207,9 +1186,10 @@ buttons_released:
     db
 pending_mode_switch::
     db
-; TODO replace this with a general sprite update queue
-anise_sprites_address:
-    dw
+; FIXME how do i ensure i can't overflow this?  oof
+gdma_queue::
+    db
+    ds 5 * 10
 
 entities_sorted_x_pos:
     ds MAX_ENTITIES * 3

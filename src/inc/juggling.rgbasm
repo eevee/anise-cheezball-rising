@@ -8,3 +8,22 @@ DerefHL: MACRO
     ld h, [hl]
     ld l, a
 ENDM
+
+
+; TODO optimize meeee
+TraverseField: MACRO
+IF \1 >= 0 && \1 <= 4
+REPT \1
+    inc hl
+ENDR
+ELIF \1 < 0 && \1 >= -4
+REPT -\1
+    dec hl
+ENDR
+ELSE
+    push bc
+    ld bc, \1
+    add hl, bc
+    pop bc
+ENDC
+ENDM
