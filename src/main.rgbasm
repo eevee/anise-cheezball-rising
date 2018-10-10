@@ -278,11 +278,24 @@ main:
     or a
     jr nz, .wait_for_no_vblank
 
+    ; Handle mode switches here, so any graphics stuff from the
+    ; previous loop is done with
+    ld a, [pending_mode_switch]
+    ; Clear the pending mode immediately, so it's gone by the
+    ; time the new mode returns here
+    push af
+    xor a
+    ld [pending_mode_switch], a
+    pop af
+    ; Check mode
+    cp a, 1
+    jp z, .do_show_dialogue
+
     call read_input
 
     ld a, [buttons_pressed]
     bit PADB_A, a
-    jp nz, .do_show_dialogue
+    call nz, handle_player_action
 
     ; Anise update loop
     ; TODO holding left+right simultaneously no longer produces
@@ -940,6 +953,7 @@ ENDM
     ld [anise_sprites_address + 1], a
 
 .no_movement:
+    ; End-of-frame cleanup
     call sort_entities
     call update_oam
 
@@ -1087,15 +1101,6 @@ fill:
 
 
 
-SECTION "Actor data", ROM0
-ANISE_ACTOR_INFO:
-    dw SPRITES_ANISE + SPRITESO_TILES
-    ; Idle pose
-    db 0, 1
-    ; Walk pose
-    db 0, 4
-
-
 SECTION "Important twiddles", WRAM0[$C000]
 vblank_flag:
     db
@@ -1104,6 +1109,8 @@ buttons:
 buttons_pressed:
     db
 buttons_released:
+    db
+pending_mode_switch::
     db
 ; TODO replace this with a general sprite update queue
 anise_sprites_address:

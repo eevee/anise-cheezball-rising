@@ -22,6 +22,7 @@ ENTITYB_UNIQUE_SPRITE EQU 0
     ; a projectile or what have you.  Lives in ROM.
     struct EntityKind
     bytes 1, flags
+    ; Radius as 4.4 fixed point (so the max size is 32px)
     bytes 1, radius
     ; This is actually a count followed by an arbitrary amount
     ; of stuff, so it goes last

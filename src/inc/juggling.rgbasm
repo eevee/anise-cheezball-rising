@@ -1,0 +1,10 @@
+; Register juggling
+
+; Load HL into itself.  Assumes HL is pointing at the first byte
+; of a little-endian address.
+; Trashes A.
+DerefHL: MACRO
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+ENDM

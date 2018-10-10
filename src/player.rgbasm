@@ -1,0 +1,164 @@
+include "inc/types/entity.rgbasm"
+include "inc/juggling.rgbasm"
+include "inc/math.rgbasm"
+
+
+SECTION "High locals: player", HRAM
+; TODO need to find a way to reuse these
+h_radius:
+    db
+
+
+SECTION "Player code", ROM0
+
+handle_player_action::
+    ; TODO this should eventually dispatch to whatever item is
+    ; equipped, but for now it just tries to activate something
+    ; in front of us
+    ld hl, anise + Entity_x
+
+    ; Load the player's coordinates into bc, de
+    ld a, [hl+]
+    ld b, a
+    ld a, [hl+]
+    ld c, a
+    ld a, [hl+]
+    ld d, a
+    ld a, [hl+]
+    ld e, a
+
+    ; Pick the target point based on the facing
+    ; TODO could use a jump table here
+    ld hl, anise + Entity_facing
+    ld a, [hl]
+    cp a, FACING_RIGHT
+    jr c, .facing_vert
+.facing_horiz:
+    cp a, FACING_LEFT
+    ld a, 8 << 4
+    jr z, .facing_left
+.facing_right:
+    AddATo16 bc
+    jr .done_facing
+.facing_left:
+    SubAFrom16 bc
+    jr .done_facing
+.facing_vert:
+    cp a, FACING_UP
+    ld a, 8 << 4
+    jr z, .facing_up
+.facing_down:
+    AddATo16 de
+    jr .done_facing
+.facing_up:
+    SubAFrom16 de
+    ;jr .done_facing
+.done_facing:
+
+    ; (bc, de) is a point; we want to find an entity containing
+    ; this point, i.e. an entity whose position is within one
+    ; radius of that point
+    ; TODO loop over all entities
+    ;ld a, [entity_count]
+    ld hl, cheezball
+    push hl
+IF Entity_kind > 0
+    ld a, Entity_kind
+    AddATo16 hl
+ENDC
+    ; a <- entity kind
+    ld a, [hl]
+    ; hl <- pointer to entity kind
+    ld hl, ENTITY_KINDS
+    add a, a
+    AddATo16 hl
+    ; hl <- entity kind
+    DerefHL
+    ; hl <- address of radius
+    ld a, EntityKind_radius
+    AddATo16 hl
+    ; a <- radius
+    ld a, [hl]
+    ldh [h_radius], a
+    pop hl
+
+    ; hl <- x
+    ; TODO maybe this needs a macro that falls back to 'inc's
+    ; automatically if they're faster or shorter?
+    ld a, Entity_x
+    AddATo16 hl
+
+    ; Find absolute difference between target x and their x
+    ; TODO i bet this could be more clever since the result HAS
+    ; to be 8 bits or otherwise i know it's too big
+    inc hl
+    push de
+    ld a, [hl-]
+    sub a, c
+    ld e, a
+    ld a, [hl+]
+    sbc a, b
+    ld d, a
+    jr nc, .skip_abs_x
+    Negate16 bc
+.skip_abs_x:
+    ; If the high byte is not zero, the distance is definitely
+    ; bigger than a radius
+    ld a, d
+    or a, a
+    jr nz, .skip_entity_x
+    ; If the low byte is greater than the radius, also skip
+    ld a, [h_radius]
+    cp a, e
+    jr c, .skip_entity_x
+    pop de
+    inc hl
+
+    ; Find absolute difference between target y and their y
+    ; Same as above, copy-pasted
+    ; TODO i bet this could be more clever since the result HAS
+    ; to be 8 bits or otherwise i know it's too big
+    inc hl
+    push bc
+    ld a, [hl-]
+    sub a, e
+    ld c, a
+    ld a, [hl-]
+    sbc a, d
+    ld b, a
+    jr nc, .skip_abs_y
+    Negate16 de
+.skip_abs_y:
+    ; If the high byte is not zero, the distance is definitely
+    ; bigger than a radius
+    ld a, b
+    or a, a
+    jr nz, .skip_entity_y
+    ; If the low byte is greater than the radius, also skip
+    ld a, [h_radius]
+    cp a, c
+    jr c, .skip_entity_y
+    pop bc
+
+    ; If we got here, we found a match!
+    ld a, Entity_y
+    SubAFrom16 hl
+    jr .do_action
+
+.skip_entity_x:
+    ; XXX argh, stack!
+    pop de
+    ret
+.skip_entity_y:
+    ; XXX argh, stack!
+    pop bc
+    ret
+.skip_entity:
+    xor a
+    ret
+
+.do_action:
+    ; TODO turn cheezball to face us
+    ld a, 1
+    ld [pending_mode_switch], a
+    ret

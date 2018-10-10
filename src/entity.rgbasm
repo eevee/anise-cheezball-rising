@@ -1,4 +1,5 @@
 include "inc/types/entity.rgbasm"
+include "inc/juggling.rgbasm"
 include "inc/math.rgbasm"
 
 
@@ -313,10 +314,7 @@ update_oam::
     ; hl <- entity kind sprite offsets
     ld hl, ENTITY_KINDS
     Add8To16 hl, e
-    ; TODO macro for loading hl into itself?
-    ld a, [hl+]
-    ld h, [hl]
-    ld l, a
+    DerefHL
     ld a, EntityKind_sprites
     AddATo16 hl
 
