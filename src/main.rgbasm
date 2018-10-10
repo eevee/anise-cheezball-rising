@@ -8,6 +8,11 @@ STACK_SIZE    EQU $200
 BYTES_PER_TILE EQU 16
 BYTES_PER_OBJECT EQU 32
 
+SCREEN_WIDTH_TILES EQU 20
+CANVAS_WIDTH_TILES EQU 32
+SCREEN_HEIGHT_TILES EQU 18
+CANVAS_HEIGHT_TILES EQU 32
+
 SPRITESO_PALETTES EQU 0
 SPRITESO_TILES EQU 64
 
@@ -49,7 +54,7 @@ SECTION "Vblank interrupt", ROM0[$0040]
 
 SECTION "LCD controller status interrupt", ROM0[$0048]
     ; I think this happens when the screen is updating and hits a user-specified row, so this is where you'd do stuff like wavy screen effects
-    reti
+    jp lcdc_interrupt
 
 SECTION "Timer overflow interrupt", ROM0[$0050]
     reti
@@ -112,11 +117,32 @@ h_our_radius:
     db
 
 
+SECTION "interrupts", ROM0
+lcdc_interrupt:
+    push af
+.wait_for_hblank:
+    ld a, [rSTAT]
+    and a, STATF_LCD
+    jr nz, .wait_for_hblank
+    ; Switch background to use the high map
+    ldh a, [rLCDC]
+    or a, LCDCF_BG9C00
+    and a, ~LCDCF_OBJON
+    ldh [rLCDC], a
+    ; Set SCX/SCY to draw the statusbar
+    xor a
+    ldh [rSCX], a
+    ld a, 256 - 144
+    ldh [rSCY], a
+    pop af
+    reti
+
+
 ; Initialization and whatnot
 SECTION "main", ROM0[$0150]
 start:
     ; Enable interrupts
-    ld a, IEF_VBLANK
+    ld a, IEF_VBLANK | IEF_LCDC
     ldh [rIE], a
     ; This instruction enables whichever interrupts are enabled according to FFFF
     ei
@@ -132,8 +158,14 @@ start:
     ; Note that the LCD is turned off here; it's re-enabled at
     ; the end of all this loading code
     call wait_for_vblank
-    ld a, LCDCF_OBJ16 | LCDCF_OBJON | LCDCF_BGON
+    ld a, LCDCF_OBJ16 | LCDCF_OBJON | LCDCF_BGON | LCDCF_WIN9C00
     ldh [rLCDC], a
+    ; Enable STAT matching
+    ; TODO: this only applies during the main game.  hm.
+    ld a, 144 - 16 - 1
+    ldh [rLYC], a
+    ld a, %01000100
+    ldh [rSTAT], a
 
     ; Zero-fill some important stuff
     xor a
@@ -173,7 +205,7 @@ start:
 
     ; Read from the test map
     ; TODO good candidate for DMA...?  or maybe not since i should really only be filling the visible screen area
-    ld hl, $9800
+    ld hl, _SCRN0
     ld de, MAP_TEST_DATA
     ld bc, 1024
     call copy16
@@ -223,6 +255,65 @@ start:
     ld a, (BYTES_PER_OBJECT * 3) / 16 - 1
     ld [rHDMA5], a
 
+    jr _statusbar
+_statusbar_pattern:
+    ;  anise portrait           B    B item    A item    A    cash icon                                    other portrait
+    db $c0, $c2, $c4, $c6, $ff, $c8, $d8, $da, $dc, $de, $ca, $cc, $ce, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
+    db $c1, $c3, $c5, $c7, $ff, $c9, $d9, $db, $dd, $df, $cb, $cd, $cf, $d0, $d0, $d0, $d1, $d2, $d2, $d3, $ff, $ff, $ff, $ff
+
+_statusbar:
+    ; Deal with statusbar
+    ; Copy its palette to slot 6
+    ld a, %10110000
+    ld [rBCPS], a
+    ld hl, SPRITES_STATUSBAR + SPRITESO_PALETTES
+    REPT 8
+    ld a, [hl+]
+    ld [rBCPD], a
+    ENDR
+    ; Copy some statusbar graphics into VRAM, starting at 1:c0
+    ; XXX change bank
+    ; XXX this seems like a bit of a mess
+    ; XXX too much, dialogue needs up through cf
+    ; c0:c7 - anise portrait
+    ld hl, $8800 + ($c0 - $80) * BYTES_PER_TILE
+    ld de, SPRITES_STATUSBAR + SPRITESO_TILES + BYTES_PER_TILE * 12 * 2
+    ld c, BYTES_PER_OBJECT * 4
+    call copy
+    ; c8:cb - B + A icons
+    ; cc:cf - cash and PP prompts
+    ; d0:d3 - PP full, current, empty, end
+    ld de, SPRITES_STATUSBAR + SPRITESO_TILES
+    ld c, BYTES_PER_OBJECT * 6
+    call copy
+    ; d8:db - B item
+    ; dc:df - A item
+    ld hl, $8800 + ($d8 - $80) * BYTES_PER_TILE
+    ld c, BYTES_PER_OBJECT * 4
+    call copy
+    ; e0:e7 - other speaker portrait (here, cheezball)
+    ld hl, $8800 + ($e0 - $80) * BYTES_PER_TILE
+    ld de, SPRITES_STATUSBAR + SPRITESO_TILES + BYTES_PER_TILE * 20 * 2
+    ld c, BYTES_PER_OBJECT * 4
+    call copy
+    ; Populate statusbar on the bottom of the alternate screen
+    ld hl, _SCRN1 + 32 * 30
+    ld de, _statusbar_pattern
+    ld c, SCREEN_WIDTH_TILES + 4
+    call copy
+    ld hl, _SCRN1 + 32 * 31
+    ld c, SCREEN_WIDTH_TILES + 4
+    call copy
+    ; Set palette and bank for all those
+    ld a, 1
+    ldh [rVBK], a
+    ld a, %00000110  ; bank 1, palette 6
+    ld c, CANVAS_WIDTH_TILES * 2
+    ld hl, _SCRN1 + 32 * 30
+    call fill
+    xor a
+    ldh [rVBK], a
+
     ; Copy the DMA copy routine into HRAM
     ld de, dma_copy
     ld hl, h_dma
@@ -241,6 +332,10 @@ main:
     ; Only have about a thousand cycles to do everything you
     ; need with VRAM, and that's assuming music doesn't eat into
     ; that time!
+
+    ; Restore the world camera, since it was messed with to show
+    ; the status bar during redraw
+    call update_world_camera
 
     ; Use DMA to copy our OAM buffer into real OAM
     ; DISABLE INTERRUPTS during this -- a timer can still fire
@@ -1151,10 +1246,6 @@ PALETTE_TEXT:
     dcolor $999999
     dcolor $333333
 
-SCREEN_WIDTH_TILES EQU 20
-CANVAS_WIDTH_TILES EQU 32
-SCREEN_HEIGHT_TILES EQU 18
-CANVAS_HEIGHT_TILES EQU 32
 TEXT_START_TILE_1 EQU 128
 TEXT_START_TILE_2 EQU TEXT_START_TILE_1 + SCREEN_WIDTH_TILES * 2
 
@@ -1165,6 +1256,7 @@ show_dialogue:
 
     ; Use four vblanks
     call wait_for_vblank
+    call update_world_camera
 
     ; Set up palette during this first vblank, too
     ld a, %10111000
@@ -1184,25 +1276,36 @@ show_dialogue:
     call fill
 
     ; Row 4
-    ld hl, $9800 + CANVAS_WIDTH_TILES * (SCREEN_HEIGHT_TILES - 1)
+    ld a, 144 - 24 - 1
+    ldh [rLYC], a
+    ld hl, _SCRN1 + CANVAS_WIDTH_TILES * (CANVAS_HEIGHT_TILES - 3)
     ld b, TEXT_START_TILE_2 + 1
     call fill_tilemap_row
 
     ; Row 3
     call wait_for_vblank
-    ld hl, $9800 + CANVAS_WIDTH_TILES * (SCREEN_HEIGHT_TILES - 2)
+    call update_world_camera
+    ld a, 144 - 32 - 1
+    ldh [rLYC], a
+    ld hl, _SCRN1 + CANVAS_WIDTH_TILES * (CANVAS_HEIGHT_TILES - 4)
     ld b, TEXT_START_TILE_2
     call fill_tilemap_row
 
     ; Row 2
     call wait_for_vblank
-    ld hl, $9800 + CANVAS_WIDTH_TILES * (SCREEN_HEIGHT_TILES - 3)
+    call update_world_camera
+    ld a, 144 - 40 - 1
+    ldh [rLYC], a
+    ld hl, _SCRN1 + CANVAS_WIDTH_TILES * (CANVAS_HEIGHT_TILES - 5)
     ld b, TEXT_START_TILE_1 + 1
     call fill_tilemap_row
 
     ; Row 1
     call wait_for_vblank
-    ld hl, $9800 + CANVAS_WIDTH_TILES * (SCREEN_HEIGHT_TILES - 4)
+    call update_world_camera
+    ld a, 144 - 48 - 1
+    ldh [rLYC], a
+    ld hl, _SCRN1 + CANVAS_WIDTH_TILES * (CANVAS_HEIGHT_TILES - 6)
     ld b, TEXT_START_TILE_1
     call fill_tilemap_row
 
@@ -1326,6 +1429,7 @@ show_dialogue:
     pop hl                      ; restore hl (VRAM)
     push af                     ; stash width, again
     call wait_for_vblank        ; always wait before drawing
+    call update_world_camera
     push bc
     push de
     ; Draw the left two tiles
@@ -1395,10 +1499,15 @@ show_dialogue:
 .done:
 .wait:
     call wait_for_vblank
+    call update_world_camera
     call read_input
     ld a, [buttons_pressed]
     bit PADB_A, a
     jr z, .wait
+
+    ; Restore statusbar twiddles
+    ld a, 144 - 16 - 1
+    ldh [rLYC], a
 
     ; Remember to reset bank to 0!
     xor a
@@ -1423,6 +1532,7 @@ show_dialogue:
     ld [text_x], a
     ld b, 4
     call wait_for_vblank
+    call update_world_camera
     jp .next_letter
 
 
@@ -1456,4 +1566,17 @@ fill_tilemap_row:
     dec c
     jr nz, .loop1
 
+    ret
+
+
+; TODO maybe temporary??  need to be able to use this from both
+; the world and dialogue
+update_world_camera:
+    xor a
+    ldh [rSCX], a
+    ldh [rSCY], a
+    ldh a, [rLCDC]
+    and a, ~LCDCF_BG9C00
+    or a, LCDCF_OBJON
+    ldh [rLCDC], a
     ret
