@@ -44,5 +44,5 @@ That said, [feel free](LICENSE.md) to use this as a base for something of your o
 - [awesome-gbdev](https://github.com/avivace/awesome-gbdev), a massive list of Game Boy dev resources
 - the _official_ Nintendo [Game Boy Programming Manual](https://archive.org/download/GameBoyProgManVer1.1/GameBoyProgManVer1.1.pdf)
 - the very helpful [Game Boy development wiki](http://gbdev.gg8.se/wiki/articles/Main_Page), which often clarifies or corrects or expands upon the manual
-- a compact table of [gbz80 opcodes](http://www.pastraiser.com/cpu/gameboy/gameboy_opcodes.html)
+- a compact table of [gbz80 opcodes](https://max-m.github.io/gb-docs/optables/classic)
 - rgbds's own [documentation](https://rednex.github.io/rgbds/)
