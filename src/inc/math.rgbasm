@@ -5,6 +5,7 @@
 ; Negates a 16-bit register.
 ; Trashes 'a'.
 ; ex: Negate16 de
+; 10 bytes, 10 M-cycles
 Negate16: MACRO
     xor a
     sub a, LOW(\1)
@@ -18,58 +19,53 @@ ENDM
 ; No clever tricks, just the six ops you'd expect.
 ; Trashes 'a'.  DO NOT use with 'a'.
 ; ex: Add8To16 bc, [hl]
+; 12 bytes, 12 M-cycles
 Add8To16: MACRO
-    ld a, LOW(\1)
-    add a, \2
-    ld LOW(\1), a
-    ld a, HIGH(\1)
-    adc a, 0
-    ld HIGH(\1), a
+    ld a, \2
+    AddATo16 \1
 ENDM
 
 ; Add 'a' to a 16-bit register.
 ; ex: AddATo16 hl
+; 10 bytes, 10 M-cycles
 AddATo16: MACRO
     add a, LOW(\1)
     ld LOW(\1), a
-    jr nc, .no_carry\@
-    inc HIGH(\1)
-.no_carry\@:
+    adc a, HIGH(\1)
+    sub LOW(\1)
+    ld HIGH(\1), a
 ENDM
 
 ; Subtract an 8-bit register from a 16-bit register, in place.
 ; No clever tricks, just the six ops you'd expect.
 ; Trashes 'a'.  DO NOT use with 'a'.
 ; ex: Sub8From16 bc, d
+; 11 bytes, 11 M-cycles
 Sub8From16: MACRO
     ld a, LOW(\1)
     sub a, \2
     ld LOW(\1), a
-    ld a, HIGH(\1)
-    sbc a, 0
+    sbc a, a
+    add a, HIGH(\1)
     ld HIGH(\1), a
 ENDM
 
 ; Subtract 'a' from a 16-bit register.
 ; ex: SubAFrom16 de
+; 11 bytes, 11 M-cycles
 SubAFrom16: MACRO
-    ; Compute a - LOW instead, and invert the result
-    sub a, LOW(\1)
     cpl
-    inc a
+    scf
+    adc a, LOW(\1)
     ld LOW(\1), a
-    ; Borrow from HIGH only if a > LOW
-    jr c, .no_borrow\@
-    jr z, .no_borrow\@
-    dec HIGH(\1)
-.no_borrow\@:
-    ; TODO should i deal with flags here...?  caller could
-    ; probably figure out over/underflow themselves if
-    ; desired...
+    adc a, HIGH(\1)
+    dec a
+    ld HIGH(\1), a
 ENDM
 
 ; Compare two 16-bit registers.  Sets the c and z flags.
 ; Trashes 'a'.
+; 10 bytes, 7/10 M-cycles
 Compare16: MACRO
     ld a, HIGH(\1)
     cp a, HIGH(\2)
