@@ -54,6 +54,7 @@ SECTION "Vblank interrupt", ROM0[$0040]
 
 SECTION "LCD controller status interrupt", ROM0[$0048]
     ; I think this happens when the screen is updating and hits a user-specified row, so this is where you'd do stuff like wavy screen effects
+    push af
     jp lcdc_interrupt
 
 SECTION "Timer overflow interrupt", ROM0[$0050]
@@ -94,7 +95,7 @@ _end_init:
 SECTION "DMA routine", ROM0
 ; DMA copy routine, not used directly but copied into high RAM at startup
 dma_copy:
-    ld a, $c1
+    ld a, HIGH(oam_buffer)
     ldh [rDMA], a               ; begin transfer
     ld a, 40                    ; wait for 160 cycles
 .loop:
@@ -102,11 +103,11 @@ dma_copy:
     jr nz, .loop
     ret
 dma_copy_end:
-    nop
 
 ; Reserved stack space
 SECTION "Stack", WRAM0[$d000 - STACK_SIZE]
     ds STACK_SIZE
+StackBottom:
 
 SECTION "High locals", HRAM
 h_dma:
@@ -119,7 +120,6 @@ h_our_radius:
 
 SECTION "interrupts", ROM0
 lcdc_interrupt:
-    push af
 .wait_for_hblank:
     ld a, [rSTAT]
     and a, STATF_LCD
@@ -132,7 +132,7 @@ lcdc_interrupt:
     ; Set SCX/SCY to draw the statusbar
     xor a
     ldh [rSCX], a
-    ld a, 256 - 144
+    ld a, -SCRN_Y
     ldh [rSCY], a
     pop af
     reti
@@ -148,7 +148,7 @@ start:
     ei
 
     ; Put the stack at the top of bank 0 of WRAM
-    ld sp, $d000
+    ld sp, StackBottom
 
     ; Set LCD palette for grayscale mode; yes, it has a palette
     ld a, %01100100
@@ -162,7 +162,7 @@ start:
     ldh [rLCDC], a
     ; Enable STAT matching
     ; TODO: this only applies during the main game.  hm.
-    ld a, 144 - 16 - 1
+    ld a, SCRN_Y - 16 - 1
     ldh [rLYC], a
     ld a, %01000100
     ldh [rSTAT], a
@@ -183,20 +183,39 @@ start:
     call fill
 
     ; Set a color palette.  Those aren't exposed directly in main RAM; instead,
-    ; you have to write to a register, which will then write the palette to...
-    ; somewhere.  Also, colors are two bytes (RGB555), but the register is only
+    ; you have to write to a register, which will then write the palette to CGRAM
+    ; Also, colors are two bytes (RGB555), but the register is only
     ; one byte, which complicates things a bit more.
     ; Luckily, if we set the high bit of the control register to 1, it
     ; auto-increments every time we write to the write register, meaning...
     ; well, it looks like this.
     ld a, %10000000
     ld [rBCPS], a
+    ld [rOCPS], a
 
     ld hl, MAP_TEST_PALETTES
-    REPT 8
+    ld bc, 8 << 8 | LOW(rBCPD)
+.initPalettes
     ld a, [hl+]
-    ld [rBCPD], a
-    ENDR
+    ldh [c], a
+    dec b
+    jr nz, .initPalettes
+
+    ; Same thing but for an object palette
+    ld hl, SPRITES_ANISE + SPRITESO_PALETTES
+    ld bc, 16 << 8 | LOW(rOCPD)
+.initAnisePalettes
+    ld a, [hl+]
+    ldh [c], a
+    dec b
+    jr nz, .initAnisePalettes
+    ld hl, SPRITES_CHEEZBALL + SPRITESO_PALETTES
+    ld b, 16
+.initCheezballPalettes
+    ld a, [hl+]
+    ldh [c], a
+    dec b
+    jr nz, .initCheezballPalettes
 
     ; Load some basic tiles
     ld hl, $9000
@@ -210,20 +229,6 @@ start:
     ld de, MAP_TEST_DATA
     ld bc, 1024
     call copy16
-
-    ; Same thing but for an object palette
-    ld a, %10000000
-    ldh [rOCPS], a
-    ld hl, SPRITES_ANISE + SPRITESO_PALETTES
-    REPT 16
-    ld a, [hl+]
-    ldh [rOCPD], a
-    ENDR
-    ld hl, SPRITES_CHEEZBALL + SPRITESO_PALETTES
-    REPT 16
-    ld a, [hl+]
-    ldh [rOCPD], a
-    ENDR
 
     ; Define an object
     ld hl, gdma_queue
@@ -249,7 +254,7 @@ start:
     ld [hl+], a
 
     ; Spawn Anise
-    ld a, 0
+    xor a
     ld bc, 64 << 4
     ld de, 64 << 4
     call spawn_entity
