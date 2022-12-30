@@ -5,7 +5,7 @@
 ; Negates a 16-bit register.
 ; Trashes 'a'.
 ; ex: Negate16 de
-Negate16: MACRO
+MACRO Negate16
     xor a
     sub a, LOW(\1)
     ld LOW(\1), a
@@ -18,7 +18,7 @@ ENDM
 ; No clever tricks, just the six ops you'd expect.
 ; Trashes 'a'.  DO NOT use with 'a'.
 ; ex: Add8To16 bc, [hl]
-Add8To16: MACRO
+MACRO Add8To16
     ld a, LOW(\1)
     add a, \2
     ld LOW(\1), a
@@ -29,7 +29,7 @@ ENDM
 
 ; Add 'a' to a 16-bit register.
 ; ex: AddATo16 hl
-AddATo16: MACRO
+MACRO AddATo16
     add a, LOW(\1)
     ld LOW(\1), a
     jr nc, .no_carry\@
@@ -41,7 +41,7 @@ ENDM
 ; No clever tricks, just the six ops you'd expect.
 ; Trashes 'a'.  DO NOT use with 'a'.
 ; ex: Sub8From16 bc, d
-Sub8From16: MACRO
+MACRO Sub8From16
     ld a, LOW(\1)
     sub a, \2
     ld LOW(\1), a
@@ -52,7 +52,7 @@ ENDM
 
 ; Subtract 'a' from a 16-bit register.
 ; ex: SubAFrom16 de
-SubAFrom16: MACRO
+MACRO SubAFrom16
     ; Compute a - LOW instead, and invert the result
     sub a, LOW(\1)
     cpl
@@ -70,7 +70,7 @@ ENDM
 
 ; Compare two 16-bit registers.  Sets the c and z flags.
 ; Trashes 'a'.
-Compare16: MACRO
+MACRO Compare16
     ld a, HIGH(\1)
     cp a, HIGH(\2)
     jr nz, .not_equal_high\@
@@ -82,7 +82,7 @@ ENDM
 ; Multiply a by some literal and add the result to hl.
 ; TODO this could probably use some variants.  for example, if
 ; the literal fits in 8 bits, could this be faster?
-StrideLiteralIntoHL: MACRO
+MACRO StrideLiteralIntoHL
     or a, a
     jr z, .skip_stride\@
     ; TODO is this push always necessary?  urgh

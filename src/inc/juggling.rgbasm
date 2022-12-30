@@ -3,7 +3,7 @@
 ; Load HL into itself.  Assumes HL is pointing at the first byte
 ; of a little-endian address.
 ; Trashes A.
-DerefHL: MACRO
+MACRO DerefHL
     ld a, [hl+]
     ld h, [hl]
     ld l, a
@@ -11,13 +11,13 @@ ENDM
 
 
 ; TODO optimize meeee
-TraverseField: MACRO
+MACRO TraverseField
 IF \1 >= 0 && \1 <= 4
 REPT \1
     inc hl
 ENDR
 ELIF \1 < 0 && \1 >= -4
-REPT -\1
+REPT -(\1)
     dec hl
 ENDR
 ELSE

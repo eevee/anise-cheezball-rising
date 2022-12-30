@@ -72,7 +72,7 @@ $(BUILD)/font.inc: util/font-to-tiles.py data/font.png
 # so make will never know it needs to be built first.  this enforces build
 # order without supplying the explicit dependency.  is there a better fix?
 $(BUILD)/%.rgbasm.o: $(SRC)/%.rgbasm | $(BUILD)/font.inc
-	$(RGBASM) -i $(SRC)/ -i $(BUILD)/ -M $(BUILD)/$*.rgbasm.deps -o $@ $<
+	$(RGBASM) -L -h -i $(SRC)/ -i $(BUILD)/ -M $(BUILD)/$*.rgbasm.deps -o $@ $<
 
 
 # ==============================================================================
