@@ -16,7 +16,7 @@ CANVAS_HEIGHT_TILES EQU 32
 SPRITESO_PALETTES EQU 0
 SPRITESO_TILES EQU 64
 
-dcolor: MACRO  ; COLOR($rrggbb) -> gbc representation
+MACRO dcolor  ; COLOR($rrggbb) -> gbc representation
 _r = ((\1) & $ff0000) >> 16 >> 3
 _g = ((\1) & $00ff00) >> 8  >> 3
 _b = ((\1) & $0000ff) >> 0  >> 3
@@ -66,13 +66,13 @@ SECTION "P10-P13 signal low edge interrupt", ROM0[$0060]
     ; ???
     reti
 
-DisableLCD: MACRO
+MACRO DisableLCD
     ld a, [rLCDC]
     and a, $ff & ~LCDCF_ON
     ld [rLCDC], a
 ENDM
 
-EnableLCD: MACRO
+MACRO EnableLCD
     ld a, [rLCDC]
     or a, LCDCF_ON
     ld [rLCDC], a
@@ -473,7 +473,7 @@ main:
 ; \2 = sign (0 = up/left/negative, 1 = down/right/positive)
 ; \3 = label to jump to when done with this axis
 ; Expects the current position to already be in bc.
-CheckCollision: MACRO
+MACRO CheckCollision
 _is_x = (\1 == 0)
 _is_y = (\1 == 1)
 _is_neg = (\2 == 0)

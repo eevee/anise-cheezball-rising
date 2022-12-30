@@ -25,7 +25,7 @@
 
 ; struct struct_name
 ; Begins a struct declaration
-struct: MACRO
+MACRO struct
     IF DEF(NB_FIELDS)
         FAIL "Please close struct definitions using `end_struct`"
     ENDC
@@ -38,7 +38,7 @@ ENDM
 
 ; end_struct
 ; Ends a struct declaration
-end_struct: MACRO
+MACRO end_struct
 ; Set nb of fields
 STRUCT_NB_FIELDS equs "{STRUCT_NAME}_nb_fields"
 STRUCT_NB_FIELDS = NB_FIELDS
@@ -56,7 +56,7 @@ ENDM
 
 ; field_name_from_id field_id
 ; For internal use, please do not use externally
-field_name_from_id: MACRO
+MACRO field_name_from_id
 FIELD_ID_STR equs "{\1}"
 STRUCT_FIELD equs STRCAT("{STRUCT_NAME}_field", STRSUB("{FIELD_ID_STR}", 2, STRLEN("{FIELD_ID_STR}") - 1))
 STRUCT_FIELD_NAME equs "{STRUCT_FIELD}_name"
@@ -66,7 +66,7 @@ ENDM
 
 ; new_field nb_elems, rs_type, field_name
 ; For internal use, please do not use externally
-new_field: MACRO
+MACRO new_field
     IF !DEF(STRUCT_NAME) || !DEF(NB_FIELDS)
         FAIL "Please start defining a struct, using `define_struct`"
     ENDC
@@ -97,26 +97,26 @@ ENDM
 
 ; bytes nb_bytes, field_name
 ; Defines a field of N bytes
-bytes: MACRO
+MACRO bytes
     new_field \1, RB, \2
 ENDM
 
 ; words nb_words, field_name
 ; Defines a field of N*2 bytes
-words: MACRO
+MACRO words
     new_field \1, RW, \2
 ENDM
 
 ; longs nb_longs, field_name
 ; Defines a field of N*4 bytes
-longs: MACRO
+MACRO longs
     new_field \1, RL, \2
 ENDM
 
 
 ; dstruct struct_type, var_name
 ; Allocates space for a struct in memory (primarily RAM)
-dstruct: MACRO
+MACRO dstruct
 NB_FIELDS equs "\1_nb_fields"
     IF !DEF(NB_FIELDS)
         FAIL "Struct \1 isn't defined!"
